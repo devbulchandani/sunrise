@@ -2,7 +2,7 @@
 
 **Wake up before the market does.**
 
-Sunrise is an autonomous financial intelligence platform that continuously monitors publicly available financial news, extracts market-moving events with AI, scores their urgency, and delivers filtered alerts to Telegram/email — all powered by a **self-healing scraping system** that detects when websites change under it, regenerates its extraction strategies with an LLM, validates the repair against real HTML, and resumes collection without human intervention.
+Sunrise is an autonomous financial intelligence platform that continuously monitors publicly available financial news, extracts market-moving events with AI (urgency, sentiment, affected assets, sectors and broad markets), scores their urgency, and delivers filtered alerts to Telegram/email — all powered by a **self-healing scraping system** that detects when websites change under it, regenerates its extraction strategies with an LLM, validates the repair against real HTML, and resumes collection without human intervention.
 
 ```
 PUBLIC WEB → SCRAPER → RAW ARTICLE → NORMALIZATION → DEDUPLICATION
@@ -81,7 +81,7 @@ Register a Bright Data-backed source (already seeded as `reuters_brightdata`):
 ```
 
 How it works:
-1. On schedule, Sunrise invokes `bdata scrape https://www.reuters.com/markets/ --format markdown` (Web Unlocker handles proxies/retries/unblocking).
+1. On schedule, Sunrise invokes `bdata scrape https://www.marketwatch.com/latest-news --format markdown` (Web Unlocker handles proxies/retries/unblocking).
 2. The returned markdown is parsed into headline entries by `brightdata_adapter.py`.
 3. Those entries flow through the exact same pipeline as every other source: normalization → dedup → clustering → AI analysis → alerts.
 4. Health metrics are tracked identically, so failures on this source are visible on the Scraper Health page too.
@@ -144,18 +144,59 @@ See `.env.example`. Key ones:
 
 ## Demo mode — watch Sunrise heal itself
 
+Requires `DEMO_MODE=true`. The Fed source is the designated break target:
+
 ```bash
 # 1. sabotage the active Fed strategy so extraction yields 0 articles
 python -m app.demo.break_scraper fed
 
-# 2. run the scraper twice (or wait for the schedule) -> FAILED, health DEGRADED
-curl -X POST localhost:8000/api/scrapers/8/run
-
-# after the failure threshold, healing triggers automatically; or force it:
+# 2. run the scraper twice (or wait for the schedule) -> FAILED, health DEGRADED,
+#    then the healing agent triggers automatically; or force it:
 python -m app.demo.trigger_healing fed
 ```
 
+A real recorded run in this repo's history: strategy v1 (seed) failed → LLM generated an XPath candidate → validated at score 82 with 29 articles recovered → **strategy v2 activated** — visible on the Scraper Health dashboard timeline.
+
 With `LLM_API_KEY` configured you'll see the full pipeline: candidate generation → validation score → `strategy v2 activated` → recovered article count. The Scraper Health page in the dashboard renders the same timeline live via SSE.
+
+### Urgency model
+
+Blended deterministic + AI score, normalized 0–100:
+
+```
+final = 0.55*AI_urgency + 0.15*source_credibility + 0.10*category_weight
+      + 0.10*novelty + 0.10*breadth_of_assets   (+ small market_impact nudge)
+
+0–20 LOW · 21–40 MODERATE · 41–60 RELEVANT · 61–80 HIGH · 81–100 CRITICAL
+```
+
+Telegram pushes at ≥61; user preferences can raise the floor or filter by asset/category.
+
+## Deployment
+
+| Component | Host | Notes |
+|---|---|---|
+| Dashboard | Cloudflare Pages | built with `VITE_API_BASE=<api-url>/api`, then `wrangler pages deploy dist` |
+| Backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small` (free tier) | one instance via `docker-compose.aws.yml` |
+
+Deploy the backend from scratch:
+
+```bash
+aws configure                                  # credentials with EC2 permissions
+./deploy/aws-ec2.sh                            # keypair + SG + t4g.small + docker install (user-data)
+scp .env ubuntu@<EC2_IP>:~/sunrise/.env        # secrets, never committed
+scp docker-compose.aws.yml ubuntu@<EC2_IP>:~/sunrise/
+ssh -i deploy/sunrise-deploy-key.pem ubuntu@<EC2_IP> \
+  'cd ~/sunrise && sudo docker compose -f docker-compose.aws.yml up -d --build'
+```
+
+Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Point the dashboard at the new API by rebuilding with `VITE_API_BASE=http://<EC2_IP>:8000/api`.
+
+Backfill/re-run analysis manually if needed:
+
+```bash
+python -m app.maintenance    # cluster unclustered articles + analyze pending events
+```
 
 ## How to add a source
 
@@ -216,10 +257,40 @@ Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomal
 
 ## Demo script (for judges)
 
-1. Open `http://localhost:5173` — Market Pulse shows sources healthy, events flowing.
-2. Open an event → see FACT vs AI INTERPRETATION separation, urgency gauge, affected assets.
-3. Configure Telegram creds → critical events arrive formatted, low-urgency ones don't.
-4. Scraper Health page → all green.
-5. `python -m app.demo.break_scraper fed` → next run fails → dashboard shows FAILED/DEGRADED with metrics.
-6. Healing agent runs automatically → timeline: analyzing → generating → validating → v2 activated → recovered.
+Live deployment: dashboard at https://sunrise-dashboard.pages.dev reading from a backend that scrapes, analyzes and alerts continuously.
+
+1. Open the dashboard — Market Pulse shows sources healthy, events flowing.
+2. Open an event → see FACT vs AI INTERPRETATION separation, urgency gauge, affected assets and affected markets.
+3. Critical/high events arrive on Telegram formatted with asset impacts; low-urgency ones never spam.
+4. Scraper Health page → status per source, success rates, strategy versions, healing history timelines.
+5. Self-healing demo: `python -m app.demo.break_scraper fed` → next run fails → dashboard shows FAILED/DEGRADED with metrics.
+6. Healing agent runs automatically → timeline: analyzing → generating candidate → validating (score) → vN+1 activated → recovered.
 7. Next run HEALTHY again. *"The website changed. The scraper broke. Sunrise noticed, repaired itself, validated the repair, and kept delivering market intelligence."*
+
+## Project structure
+
+```
+├── backend/
+│   ├── app/
+│   │   ├── api/            # FastAPI routes + SSE stream
+│   │   ├── core/           # config, structured logging, redis channels
+│   │   ├── db/             # async engine/session
+│   │   ├── models/         # SQLAlchemy schema (12 tables)
+│   │   ├── schemas/        # API response models
+│   │   ├── llm/            # provider-agnostic client + Pydantic output schemas
+│   │   ├── services/
+│   │   │   ├── scraping/   # fetcher, strategy executor, health, runner, brightdata adapter
+│   │   │   ├── healing/    # agent, validation pipeline, prompts
+│   │   │   ├── analysis/   # clustering, analyzer, urgency blending
+│   │   │   ├── notifications/  # telegram, email, preference dispatcher
+│   │   │   └── deduplication/
+│   │   ├── workers/        # arq tasks (scrape / analyze / heal / notify)
+│   │   ├── scheduler/      # APScheduler cron loop
+│   │   └── demo/           # break_scraper / trigger_healing commands
+│   └── tests/              # pytest suite
+├── frontend/               # React + Vite + Tailwind dashboard
+├── deploy/                 # AWS EC2 launch scripts
+├── docker-compose.yml      # local dev (postgres+redis) / full stack
+├── docker-compose.aws.yml  # production backend-only stack
+└── Makefile
+```
