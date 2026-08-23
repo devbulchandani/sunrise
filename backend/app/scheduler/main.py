@@ -137,6 +137,11 @@ async def main() -> None:
     scheduler.start()
     log.info("scheduler.started")
 
+    # telegram subscriber bot — one poller, runs alongside the scheduler
+    from app.services.notifications.bot_subscribers import poll_forever
+
+    bot_task = asyncio.create_task(poll_forever())
+
     # periodically pick up newly added/changed sources
     while True:
         await asyncio.sleep(60)
@@ -144,6 +149,10 @@ async def main() -> None:
             await refresh_jobs(scheduler)
         except Exception as exc:
             log.error("scheduler.refresh_failed", error=str(exc)[:200])
+        if bot_task.done():
+            exc = bot_task.exception()
+            log.error("bot.task_died", error=str(exc)[:200] if exc else "unknown")
+            bot_task = asyncio.create_task(poll_forever())
 
 
 if __name__ == "__main__":

@@ -125,11 +125,14 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
             if ok:
                 sent += 1
 
-    # default chat from env (demo channel) even with no users configured
-    if not users and telegram_configured():
-        payload = build_event_message_context(event, assets)
-        level = urgency_level(event.urgency)
-        if event.urgency >= CHANNEL_FLOORS["telegram"]:
+    # owner's default chat from env — always receives critical+ events,
+    # skipped if the owner also subscribed via the bot (would double-send)
+    if telegram_configured() and event.urgency >= CHANNEL_FLOORS["telegram"]:
+        owner_is_subscriber = any(
+            u.telegram_chat_id == settings.telegram_chat_id for u in users
+        )
+        if not users or not owner_is_subscriber:
+            payload = build_event_message_context(event, assets)
             text = format_event_message(payload)
             ok, err = await send_telegram(text)
             session.add(
