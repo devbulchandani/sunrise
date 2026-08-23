@@ -27,6 +27,8 @@ async def shutdown(ctx):
 
 
 class WorkerSettings:
+    # arq reads this class attribute for its own job-consumption pool
+    redis_url = get_settings().redis_url
     functions = [scrape_source, analyze_event_task, heal_source_job, send_startup_ping]
     on_startup = startup
     on_shutdown = shutdown
