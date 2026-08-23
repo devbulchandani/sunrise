@@ -235,7 +235,9 @@ GET  /api/preferences                PUT  /api/preferences
 
 ### Multi-subscriber bot
 
-Sunrise ships with a built-in Telegram subscriber bot — **anyone can receive alerts**, not just you:
+Sunrise ships with a built-in Telegram subscriber bot — **anyone can receive alerts**, not just you.
+
+**Live bot: [@sunrisescraperbot](https://t.me/sunrisescraperbot)** — send `/start` to subscribe.
 
 - The scheduler process long-polls Telegram for updates (no webhook or public URL needed).
 - Anyone who sends `/start` to your bot is registered as a subscriber with their own preferences and starts receiving events.
