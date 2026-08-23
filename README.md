@@ -61,7 +61,32 @@ Every source has a **versioned extraction strategy** stored in Postgres — pure
 
 ## Data sources
 
-7 public sources seeded by default: Federal Reserve press releases (HTML), ECB press RSS, Bank of England RSS, Cointelegraph, CoinDesk, Yahoo Finance, Investing.com commodities. All public pages, robots.txt respected, rate-limited per host.
+8 public sources seeded by default: Federal Reserve press releases (HTML), ECB press RSS, Bank of England RSS, Cointelegraph, CoinDesk, Yahoo Finance, Investing.com commodities — plus **MarketWatch via Bright Data** (see below). All public pages, robots.txt respected, rate-limited per host.
+
+## Bright Data integration (Web Unlocker)
+
+Sunrise's core collectors are owned infrastructure, but some financial sites run aggressive anti-bot protection that makes direct collection impractical — MarketWatch is a live example in this repo. For those targets Sunrise supports an auxiliary source type powered by **Bright Data's Web Unlocker** through the official `@brightdata/cli`:
+
+```bash
+npm i -g @brightdata/cli
+bdata login                      # OAuth, once
+# or: BRIGHTDATA_API_KEY=... in .env
+```
+
+Register a Bright Data-backed source (already seeded as `reuters_brightdata`):
+
+```json
+{"slug": "reuters_brightdata", "name": "MarketWatch via Bright Data",
+ "url": "https://www.marketwatch.com/latest-news", "type": "brightdata", ...}
+```
+
+How it works:
+1. On schedule, Sunrise invokes `bdata scrape https://www.reuters.com/markets/ --format markdown` (Web Unlocker handles proxies/retries/unblocking).
+2. The returned markdown is parsed into headline entries by `brightdata_adapter.py`.
+3. Those entries flow through the exact same pipeline as every other source: normalization → dedup → clustering → AI analysis → alerts.
+4. Health metrics are tracked identically, so failures on this source are visible on the Scraper Health page too.
+
+This keeps a clean separation: **owned self-healing collectors for the long tail, Bright Data for the walled gardens** — both feeding one intelligence pipeline.
 
 ## Quick start
 

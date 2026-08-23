@@ -141,32 +141,36 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
 
     entries: list[dict] = []
     try:
-        result = await fetch(client, source.url)
-        run.http_status = result.status_code
-        run.response_time_ms = result.elapsed_ms
-
-        http_error = classify_http_error(result.status_code)
-        if http_error:
-            raise FetchHttpError(http_error, f"HTTP {result.status_code} from {source.url}")
-
-        if source.type == "rss":
-            import feedparser
-
-            parsed_feed = feedparser.parse(result.html)
-            entries = extract_rss_entries(parsed_feed)
-        elif source.type == "brightdata":
+        if source.type == "brightdata":
+            # Bright Data handles fetching/unblocking; no direct request.
             from app.services.scraping.brightdata_adapter import run_brightdata_source
 
+            run.http_status = 200
             entries = await run_brightdata_source(source)
         else:
-            if strategy is None:
-                raise RuntimeError("no active extraction strategy")
-            from app.llm.schemas import ExtractionStrategy
+            result = await fetch(client, source.url)
+            run.http_status = result.status_code
+            run.response_time_ms = result.elapsed_ms
 
-            parsed_strategy = ExtractionStrategy.model_validate(strategy.strategy_json)
-            entries = extract_articles(result.html, parsed_strategy, base_url=source.url)
+            http_error = classify_http_error(result.status_code)
+            if http_error:
+                raise FetchHttpError(http_error, f"HTTP {result.status_code} from {source.url}")
 
-        await _save_snapshot(session, source, source.url, result.html)
+            if source.type == "rss":
+                import feedparser
+
+                parsed_feed = feedparser.parse(result.html)
+                entries = extract_rss_entries(parsed_feed)
+            else:
+                if strategy is None:
+                    raise RuntimeError("no active extraction strategy")
+                from app.llm.schemas import ExtractionStrategy
+
+                parsed_strategy = ExtractionStrategy.model_validate(strategy.strategy_json)
+                entries = extract_articles(result.html, parsed_strategy, base_url=source.url)
+
+        if source.type != "brightdata":
+            await _save_snapshot(session, source, source.url, result.html)
 
         # historical context for anomaly detection
         counts_result = await session.execute(
@@ -182,7 +186,7 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
         historical = list(counts_result.scalars())
 
         metrics = compute_metrics(entries)
-        verdict = detect_anomalies(metrics, result.status_code, historical)
+        verdict = detect_anomalies(metrics, run.http_status or 200, historical)
 
         new_count, dup_ratio = await _persist_articles(session, source, entries)
 
