@@ -1,5 +1,7 @@
 """arq worker settings. Run with: `arq app.workers.settings.WorkerSettings`"""
 
+from arq.connections import RedisSettings
+
 from app.core.config import get_settings
 from app.workers.tasks import (
     analyze_event_task,
@@ -8,13 +10,15 @@ from app.workers.tasks import (
     send_startup_ping,
 )
 
+# env-driven so it works locally (localhost) and inside compose (redis service)
+_redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+
 
 async def startup(ctx):
-    settings = get_settings()
     from redis.asyncio import Redis
     from arq import create_pool
-    from arq.connections import RedisSettings
 
+    settings = get_settings()
     ctx["redis"] = Redis.from_url(settings.redis_url, decode_responses=True)
     ctx["enqueue"] = await create_pool(RedisSettings.from_dsn(settings.redis_url))
 
@@ -27,8 +31,8 @@ async def shutdown(ctx):
 
 
 class WorkerSettings:
-    # arq reads this class attribute for its own job-consumption pool
-    redis_url = get_settings().redis_url
+    # arq consumes jobs through this pool
+    redis_settings = _redis_settings
     functions = [scrape_source, analyze_event_task, heal_source_job, send_startup_ping]
     on_startup = startup
     on_shutdown = shutdown
