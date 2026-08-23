@@ -57,7 +57,7 @@ Every source has a **versioned extraction strategy** stored in Postgres — pure
 | Scraping | httpx + selectolax/lxml + feedparser (no paid services) |
 | LLM | OpenAI-compatible endpoints (OpenAI/OpenRouter/NVIDIA NIM) + Anthropic adapter |
 | Frontend | React + Vite + TypeScript + Tailwind |
-| Notifications | Telegram Bot API + SMTP email |
+| Notifications | Telegram Bot API (multi-subscriber bot with per-user preferences) + SMTP email |
 
 ## Data sources
 
@@ -232,6 +232,34 @@ GET  /api/preferences                PUT  /api/preferences
 1. Talk to [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN`.
 2. Message your bot once, then get your chat ID from `https://api.telegram.org/bot<TOKEN>/getUpdates` → put it in `TELEGRAM_CHAT_ID`.
 3. Events at urgency ≥ 61 (HIGH/CRITICAL) are pushed immediately with asset impacts and clearly labeled AI interpretation. Lower-urgency events don't spam.
+
+### Multi-subscriber bot
+
+Sunrise ships with a built-in Telegram subscriber bot — **anyone can receive alerts**, not just you:
+
+- The scheduler process long-polls Telegram for updates (no webhook or public URL needed).
+- Anyone who sends `/start` to your bot is registered as a subscriber with their own preferences and starts receiving events.
+- Each alert fans out to every subscriber, filtered by *their* settings.
+- Your own `TELEGRAM_CHAT_ID` keeps working as the owner channel (no duplicates if you also subscribe via the bot).
+
+Subscriber commands:
+
+| Command | Effect |
+|---|---|
+| `/start` | Subscribe (default: urgency ≥ 61) |
+| `/urgency 80` | Only receive events at that threshold or higher |
+| `/assets BTC,SPY` | Only events touching those symbols |
+| `/categories crypto,macro` | Filter: `crypto`, `macro`, `stocks`, `geopolitics`, `commodities` |
+| `/status` | Show current settings |
+| `/stop` | Unsubscribe |
+
+Every new subscriber receives a welcome message stating that alerts are AI interpretation with confidence levels — never financial advice.
+
+To run the poller standalone instead of inside the scheduler:
+
+```bash
+python -m app.services.notifications.bot_subscribers
+```
 
 ## Running tests
 
