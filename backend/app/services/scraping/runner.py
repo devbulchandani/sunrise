@@ -146,7 +146,15 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
             from app.services.scraping.brightdata_adapter import run_brightdata_source
 
             run.http_status = 200
-            entries = await run_brightdata_source(source)
+            try:
+                entries = await run_brightdata_source(source)
+            except Exception as exc:
+                # infrastructure/service failure (CLI missing, rate limit,
+                # upstream block) — transient, not a site structure change:
+                # retry with backoff rather than triggering healing.
+                raise FetchHttpError(
+                    "NETWORK_FAILURE", f"brightdata: {exc}"
+                ) from exc
         else:
             result = await fetch(client, source.url)
             run.http_status = result.status_code
