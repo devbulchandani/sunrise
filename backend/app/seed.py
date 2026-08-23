@@ -90,6 +90,16 @@ SEED_SOURCES = [
         "strategy": {"fields": {}},
     },
     {
+        "slug": "reuters_brightdata",
+        "name": "MarketWatch via Bright Data",
+        "url": "https://www.marketwatch.com/latest-news",
+        "type": "brightdata",
+        "schedule": "*/20 * * * *",
+        "category": "MARKET_MOVEMENT",
+        "credibility": 0.9,
+        "strategy": {"fields": {}},
+    },
+    {
         "slug": "investing_commodities",
         "name": "Investing.com Commodities",
         "url": "https://www.investing.com/rss/news_11.rss",
