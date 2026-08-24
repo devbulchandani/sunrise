@@ -88,7 +88,7 @@ async def _claim_notification(session: AsyncSession, event_id: int, channel: str
         text(
             "INSERT INTO notifications (user_id, event_id, channel, status) "
             "VALUES (:uid, :eid, :ch, 'QUEUED') "
-            "ON CONFLICT (event_id, channel, COALESCE(user_id, -1)) DO NOTHING "
+            "ON CONFLICT (event_id, channel, COALESCE(CAST(:uid AS INTEGER), -1)) DO NOTHING "
             "RETURNING id"
         ),
         {"uid": user_id, "eid": event_id, "ch": channel},
@@ -102,7 +102,7 @@ async def _mark_sent(session: AsyncSession, event_id: int, channel: str, user_id
     await session.execute(
         text(
             "UPDATE notifications SET status=:st, error=:err, sent_at=:at "
-            "WHERE event_id=:eid AND channel=:ch AND COALESCE(user_id,-1)=COALESCE(:uid,-1)"
+            "WHERE event_id=:eid AND channel=:ch AND COALESCE(user_id,-1)=COALESCE(CAST(:uid AS INTEGER),-1)"
         ),
         {
             "st": "SENT" if ok else "FAILED",
@@ -214,19 +214,11 @@ def build_event_message_context(event: MarketEvent, assets) -> dict:
 
 
 async def _send_telegram_for_user(session, user, event, payload):
+    """Send one telegram message. The notification row is claimed/updated by
+    the caller (claim -> send -> mark); adding another row here would violate
+    the uq_notifications_once index."""
     if not telegram_configured():
         return False, ""
-    chat_id = user.telegram_chat_id  # None -> default env chat
+    chat_id = user.telegram_chat_id
     text = format_event_message(payload)
-    ok, err = await send_telegram(text, chat_id=chat_id)
-    session.add(
-        Notification(
-            user_id=user.id,
-            event_id=event.id,
-            channel="telegram",
-            status="SENT" if ok else "FAILED",
-            error=err or None,
-            sent_at=datetime.now(timezone.utc) if ok else None,
-        )
-    )
-    return ok, err
+    return await send_telegram(text, chat_id=chat_id)
