@@ -169,6 +169,10 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
 
                 parsed_feed = feedparser.parse(result.html)
                 entries = extract_rss_entries(parsed_feed)
+            elif source.type == "tradingview":
+                from app.services.scraping.tradingview import extract_init_data_articles
+
+                entries = extract_init_data_articles(result.html, base_url=source.url)
             else:
                 if strategy is None:
                     raise RuntimeError("no active extraction strategy")
