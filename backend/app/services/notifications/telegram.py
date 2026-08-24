@@ -65,6 +65,22 @@ def format_event_message(event: dict) -> str:
         lines.append("  " + "  ".join(asset_lines))
         lines.append("")
 
+    ipo = event.get("ipo")
+    if ipo:
+        lines.append("IPO RESEARCH (AI-generated, not advice)")
+        if ipo.get("company_overview"):
+            lines.append(ipo["company_overview"][:400])
+        strengths = ipo.get("strengths") or []
+        risks = ipo.get("risks") or []
+        if strengths:
+            lines.append("Strengths: " + "; ".join(strengths[:3]))
+        if risks:
+            lines.append("Risks: " + "; ".join(risks[:3]))
+        considerations = ipo.get("considerations") or []
+        if considerations:
+            lines.append("Considerations: " + considerations[0][:200])
+        lines.append("")
+
     if event.get("reason"):
         lines.append("WHY IT MAY MATTER (AI interpretation)")
         # wrap at ~70 chars

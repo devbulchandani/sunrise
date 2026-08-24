@@ -202,6 +202,7 @@ class MarketEvent(Base):
     confidence: Mapped[int | None] = mapped_column(Integer)
     reason: Mapped[str | None] = mapped_column(Text)
     affected_markets: Mapped[list] = mapped_column(JSON, default=list)  # e.g. ["US Equities", "Crypto"]
+    ipo_research: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # agentic IPO deep-dive
     analysis_status: Mapped[str] = mapped_column(String(16), default="PENDING")  # PENDING|DONE|FAILED
     first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
