@@ -120,7 +120,18 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
     if len(articles) == 1:
         event.headline = articles[0].title[:500]
 
-    event.summary = articles[0].summary
+    # WHAT HAPPENED: prefer the article's own summary (HTML-stripped); fall back
+    # to the LLM's factual summary so the field is never empty
+    import re as _re
+
+    factual = ""
+    for article in articles:
+        raw = (article.summary or "").strip()
+        if raw:
+            factual = _re.sub(r"<[^>]+>", " ", raw)
+            factual = _re.sub(r"\s+", " ", factual).strip()
+            break
+    event.summary = factual[:2000] or analysis.summary
     event.ai_summary = analysis.summary
     event.category = analysis.category
     event.sentiment = analysis.sentiment

@@ -99,7 +99,7 @@ export default function EventDetail() {
             <SectionLabel>What Happened</SectionLabel>
             <Card>
               <p className="text-sm leading-relaxed text-ink">
-                {event.summary || "No factual summary available yet."}
+                {event.summary || event.ai_summary || "No factual summary available yet."}
               </p>
             </Card>
           </section>
@@ -277,7 +277,7 @@ export default function EventDetail() {
                 {event.sources.map((s, i) => (
                   <a
                     key={`${s.id}-${i}`}
-                    href={s.url ?? "#"}
+                    href={s.article_url || s.url || "#"}
                     target="_blank"
                     rel="noreferrer"
                     className="group flex items-center justify-between rounded-md border border-edge bg-surface px-3 py-2.5 transition-colors hover:border-edge-bright"

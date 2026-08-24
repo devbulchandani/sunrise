@@ -129,6 +129,24 @@ export function healScraper(id: string | number): Promise<HealOutcome> {
   return request<HealOutcome>(`/scrapers/${id}/heal`, { method: "POST" });
 }
 
+export interface ScraperArticle {
+  id: number;
+  title: string;
+  url: string;
+  summary?: string | null;
+  published_at?: string | null;
+  scraped_at: string;
+}
+
+export async function getScraperArticles(
+  id: string | number,
+): Promise<ScraperArticle[]> {
+  const data = await request<{ articles: ScraperArticle[] }>(
+    `/scrapers/${id}/articles?limit=50`,
+  );
+  return data.articles;
+}
+
 export function getStats(): Promise<SystemStats> {
   return request<SystemStats>("/stats");
 }
