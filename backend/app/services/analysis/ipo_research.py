@@ -25,7 +25,7 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.core.redis import CHANNELS, get_redis, publish
 from app.core.config import get_settings
-from app.llm.client import get_llm
+from app.llm.client import LLMError, get_llm
 from app.models.models import MarketEvent, utcnow
 
 log = get_logger("analysis.ipo")
@@ -174,6 +174,21 @@ STRICT RULES:
 }"""
 
 
+async def _llm_with_retry(llm, schema, system: str, user: str, max_tokens: int, attempts: int = 3):
+    """LLM call with backoff — the stealth upstream rate-limits intermittently."""
+    import asyncio as _asyncio
+
+    for attempt in range(attempts):
+        try:
+            return await llm.structured(schema, system, user, max_tokens=max_tokens)
+        except LLMError as exc:
+            if attempt == attempts - 1:
+                raise
+            wait = 15 * (attempt + 1)
+            log.warn("ipo.llm_retry", attempt=attempt + 1, wait=wait, error=str(exc)[:120])
+            await _asyncio.sleep(wait)
+
+
 async def run_ipo_research(session: AsyncSession, event_id: int) -> dict | None:
     """Full agentic pipeline for one event. Returns and persists IPIOResearch."""
     llm = get_llm()
@@ -194,7 +209,8 @@ async def run_ipo_research(session: AsyncSession, event_id: int) -> dict | None:
     corpus = "\n\n".join(
         f"TITLE: {a.title}\nSUMMARY: {a.summary or ''}" for a in event.articles[:5]
     )[:6000]
-    extraction = await llm.structured(
+    extraction = await _llm_with_retry(
+        llm,
         IPOExtraction,
         EXTRACT_SYSTEM,
         f"ARTICLES:\n{corpus}\n\nHEADLINE: {event.headline}",
@@ -220,12 +236,19 @@ async def run_ipo_research(session: AsyncSession, event_id: int) -> dict | None:
             f"NEWS CONTEXT: {corpus[:1500]}",
         ]
         for _ in range(3):
-            decision = await llm.structured(
-                ResearchDecision,
-                RESEARCH_SYSTEM,
-                "\n".join(conversation[-6:]),
-                max_tokens=300,
-            )
+            try:
+                decision = await _llm_with_retry(
+                    llm,
+                    ResearchDecision,
+                    RESEARCH_SYSTEM,
+                    "\n".join(conversation[-6:]),
+                    max_tokens=300,
+                    attempts=2,
+                )
+            except LLMError:
+                # rate limited mid-research — synthesize with what we have
+                log.warn("ipo.decision_bailout", event=event_id)
+                break
             if decision.action == "done":
                 break
             if decision.action == "search" and decision.query:
@@ -256,8 +279,8 @@ async def run_ipo_research(session: AsyncSession, event_id: int) -> dict | None:
         (f"\n\nNOTE: web research tools were unavailable; mark model-knowledge claims as unverified."
          if not has_tools else "")
     )
-    research = await llm.structured(
-        IPIOResearch, SYNTH_SYSTEM, synthesis_input, max_tokens=3000
+    research = await _llm_with_retry(
+        llm, IPIOResearch, SYNTH_SYSTEM, synthesis_input, max_tokens=3000
     )
     if not sources_used:
         sources_used = ["article corpus", "model knowledge (unverified)"]
