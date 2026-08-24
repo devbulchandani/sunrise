@@ -172,6 +172,8 @@ async def handle_update(session: AsyncSession, update: dict) -> None:
     else:
         reply = "Unknown command. /start shows options."
 
+    await session.commit()
+
     await _tg_call(
         httpx.AsyncClient(),
         "sendMessage",
