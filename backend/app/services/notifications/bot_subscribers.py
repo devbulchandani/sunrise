@@ -182,12 +182,34 @@ async def handle_update(session: AsyncSession, update: dict) -> None:
     log.info("bot.command", chat=chat_id, command=command)
 
 
+async def register_command_menu() -> None:
+    """Register the '/' command menu so Telegram clients autocomplete commands."""
+    async with httpx.AsyncClient(timeout=20) as client:
+        await _tg_call(
+            client,
+            "setMyCommands",
+            {
+                "commands": [
+                    {"command": "start", "description": "Subscribe to market alerts"},
+                    {"command": "urgency", "description": "Minimum urgency 0-100 (e.g. /urgency 80)"},
+                    {"command": "assets", "description": "Filter by symbols (e.g. /assets BTC,SPY)"},
+                    {"command": "categories", "description": "Filter: crypto, macro, stocks, geopolitics, commodities"},
+                    {"command": "status", "description": "Show your current settings"},
+                    {"command": "stop", "description": "Unsubscribe from alerts"},
+                ]
+            },
+        )
+    log.info("bot.command_menu_registered")
+
+
 async def poll_forever() -> None:
     """Long-polling loop; run as a background task in the scheduler process."""
     settings = get_settings()
     if not (settings.telegram_bot_token):
         log.warn("bot.disabled_no_token")
         return
+
+    await register_command_menu()
 
     offset = _load_offset()
     log.info("bot.started")
