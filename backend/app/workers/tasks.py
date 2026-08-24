@@ -13,6 +13,7 @@ from app.models.models import Article, EventArticle, Source
 from app.services.analysis.analyzer import analyze_event
 from app.services.analysis.clustering import find_or_create_event
 from app.services.healing.agent import heal_source
+from app.services.analysis.ipo_research import run_ipo_research
 from app.services.notifications.dispatcher import dispatch_event_notifications
 from app.services.scraping.runner import run_source
 
@@ -83,6 +84,12 @@ async def analyze_event_task(ctx, event_id: int) -> dict:
         if event is None:
             return {"status": "missing"}
         if event.analysis_status == "DONE":
+            if event.category == "IPO":
+                # agentic deep-dive runs after the standard analysis
+                try:
+                    await run_ipo_research(session, event_id)
+                except Exception as exc:
+                    log.warn("ipo.task_failed", event=event_id, error=str(exc)[:200])
             await dispatch_event_notifications(session, event_id)
             return {"status": "done", "urgency": event.urgency}
         # LLM failed -> analysis stays PENDING for retry

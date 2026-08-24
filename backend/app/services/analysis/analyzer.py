@@ -31,7 +31,7 @@ interpretation of why it may matter.
 
 {
   "summary": "2-3 sentence factual summary of what happened",
-  "category": "one of MONETARY_POLICY|INFLATION|EMPLOYMENT|GDP|REGULATION|CRYPTO|EARNINGS|MERGERS_ACQUISITIONS|GEOPOLITICS|COMMODITIES|MARKET_MOVEMENT|BANKING|TECHNOLOGY|AI|ENERGY|OTHER",
+  "category": "one of MONETARY_POLICY|INFLATION|EMPLOYMENT|GDP|REGULATION|CRYPTO|EARNINGS|MERGERS_ACQUISITIONS|GEOPOLITICS|COMMODITIES|MARKET_MOVEMENT|BANKING|TECHNOLOGY|AI|ENERGY|IPO|OTHER. Use IPO when the news is about a company filing, pricing, or debuting an initial public offering.",
   "sentiment": "BULLISH|BEARISH|NEUTRAL (expected direction for affected mainstream assets)",
   "market_impact": "LOW|MEDIUM|HIGH|CRITICAL",
   "urgency": 0-100 integer,

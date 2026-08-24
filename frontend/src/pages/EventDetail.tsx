@@ -137,6 +137,78 @@ export default function EventDetail() {
             </div>
           </section>
 
+          {/* IPO RESEARCH */}
+          {event.ipo_research ? (
+            <section>
+              <SectionLabel>
+                IPO Deep-Dive — {(event.ipo_research.company_name || "Company").toUpperCase()}
+              </SectionLabel>
+              <Card>
+                <p className="text-sm leading-relaxed text-ink">
+                  {event.ipo_research.company_overview}
+                </p>
+                {event.ipo_research.business_model ? (
+                  <p className="mt-2 text-sm leading-relaxed text-ink-dim">
+                    <span className="font-semibold text-ink">Business model: </span>
+                    {event.ipo_research.business_model}
+                  </p>
+                ) : null}
+                {!!event.ipo_research.key_financials?.length && (
+                  <div className="mt-3">
+                    <p className="font-mono text-[11px] uppercase tracking-widest text-ink-dim">Key financials</p>
+                    <ul className="mt-1 space-y-1">
+                      {event.ipo_research.key_financials.map((f, i) => (
+                        <li key={i} className="font-mono text-xs text-ink">— {f}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-widest text-bull">Strengths</p>
+                    <ul className="mt-1 space-y-1">
+                      {(event.ipo_research.strengths || []).map((x, i) => (
+                        <li key={i} className="text-xs text-ink-dim">+ {x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-widest text-bear">Risks</p>
+                    <ul className="mt-1 space-y-1">
+                      {(event.ipo_research.risks || []).map((x, i) => (
+                        <li key={i} className="text-xs text-ink-dim">− {x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                {event.ipo_research.valuation_notes ? (
+                  <p className="mt-3 text-sm leading-relaxed text-ink-dim">
+                    <span className="font-semibold text-ink">Valuation: </span>
+                    {event.ipo_research.valuation_notes}
+                  </p>
+                ) : null}
+                {!!event.ipo_research.considerations?.length && (
+                  <div className="mt-3 rounded border border-amber/40 bg-amber/5 p-3">
+                    <p className="font-mono text-[11px] uppercase tracking-widest text-amber">
+                      Considerations — AI research, not investment advice
+                    </p>
+                    <ul className="mt-1 space-y-1">
+                      {event.ipo_research.considerations.map((x, i) => (
+                        <li key={i} className="text-xs leading-relaxed text-ink">• {x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <p className="mt-3 font-mono text-[10px] text-ink-dim">
+                  research confidence: {event.ipo_research.research_confidence ?? "?"}%
+                  {event.ipo_research.sources_used?.length
+                    ? ` · sources: ${event.ipo_research.sources_used.length}`
+                    : ""}
+                </p>
+              </Card>
+            </section>
+          ) : null}
+
           {/* AFFECTED MARKETS */}
           {event.affected_markets?.length ? (
             <section>

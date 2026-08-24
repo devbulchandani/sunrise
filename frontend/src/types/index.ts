@@ -24,6 +24,25 @@ export interface MarketEvent {
   affected_markets?: string[] | null;
 }
 
+export interface IPIOResearch {
+  company_name: string;
+  ticker?: string;
+  exchange?: string;
+  sector?: string;
+  company_overview: string;
+  business_model?: string;
+  key_financials?: string[];
+  ipo_terms?: string[];
+  strengths?: string[];
+  risks?: string[];
+  valuation_notes?: string;
+  use_of_proceeds?: string;
+  considerations?: string[];
+  research_confidence?: number;
+  sources_used?: string[];
+  researched_at?: string;
+}
+
 export interface AffectedAsset {
   symbol: string;
   impact: number | string;
@@ -50,6 +69,7 @@ export interface Article {
 export interface EventDetail extends MarketEvent {
   reason?: string | null;
   affected_markets?: string[] | null;
+  ipo_research?: IPIOResearch | null;
   affected_assets?: AffectedAsset[] | null;
   sources?: EventSourceRef[] | null;
   articles?: Article[] | null;
