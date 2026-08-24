@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   getHealingHistory,
+  getScraperArticles,
   getScraperHealth,
   healScraper,
   runScraper,
+  type ScraperArticle,
 } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { useEventStream } from "../hooks/useEventStream";
@@ -46,6 +48,19 @@ function ScraperCard({
     message: null,
     error: false,
   });
+  const [articles, setArticles] = useState<ScraperArticle[] | null>(null);
+  const [showArticles, setShowArticles] = useState(false);
+
+  const openArticles = async () => {
+    setShowArticles(true);
+    if (articles === null) {
+      try {
+        setArticles(await getScraperArticles(scraper.source_id));
+      } catch {
+        setArticles([]);
+      }
+    }
+  };
 
   const runNow = async () => {
     setAction({ busy: "run", message: null, error: false });
@@ -171,7 +186,64 @@ function ScraperCard({
           {action.busy === "heal" && <Spinner className="h-3 w-3" />}
           Heal
         </button>
+        <button
+          onClick={openArticles}
+          className="inline-flex items-center gap-1.5 rounded border border-edge px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-dim transition-colors hover:border-edge-bright hover:text-ink"
+        >
+          Articles
+        </button>
       </div>
+
+      {showArticles && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setShowArticles(false)}
+        >
+          <div
+            className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-edge bg-surface p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-mono text-sm uppercase tracking-widest text-ink">
+                {scraper.name} — articles
+              </h3>
+              <button
+                onClick={() => setShowArticles(false)}
+                className="rounded border border-edge px-2 py-1 font-mono text-[11px] text-ink-dim hover:text-ink"
+              >
+                close
+              </button>
+            </div>
+            {articles === null ? (
+              <div className="flex justify-center py-8">
+                <Spinner className="h-5 w-5" />
+              </div>
+            ) : articles.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink-dim">
+                No articles collected yet.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {articles.map((a) => (
+                  <li key={a.id}>
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded border border-edge px-3 py-2 transition-colors hover:border-edge-bright"
+                    >
+                      <p className="text-sm leading-snug text-ink">{a.title}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-ink-faint">
+                        {relativeTime(a.published_at || a.scraped_at)}
+                      </p>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {action.message && (
         <p

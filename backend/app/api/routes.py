@@ -142,21 +142,24 @@ async def event_detail(event_id: int, db: AsyncSession = Depends(get_db)):
     for article in sorted(event.articles, key=lambda a: a.scraped_at):
         source_name = article.source.name if article.source else None
         if article.source:
-            sources_map[article.source.id] = {
-                "id": article.source.id,
-                "slug": article.source.slug,
-                "name": article.source.name,
-                "url": article.source.url,
-                "type": article.source.type,
-                "schedule": article.source.schedule,
-                "category": article.source.category,
-                "credibility": article.source.credibility,
-                "active": article.source.active,
-                "health_status": article.source.health_status,
-                "current_strategy_version": article.source.current_strategy_version,
-                "last_success_at": article.source.last_success_at,
-                "last_failure_at": article.source.last_failure_at,
-            }
+            if article.source.id not in sources_map:
+                entry = {
+                    "id": article.source.id,
+                    "slug": article.source.slug,
+                    "name": article.source.name,
+                    "url": article.source.url,
+                    "article_url": article.url,  # deep-link to the actual article
+                    "type": article.source.type,
+                    "schedule": article.source.schedule,
+                    "category": article.source.category,
+                    "credibility": article.source.credibility,
+                    "active": article.source.active,
+                    "health_status": article.source.health_status,
+                    "current_strategy_version": article.source.current_strategy_version,
+                    "last_success_at": article.source.last_success_at,
+                    "last_failure_at": article.source.last_failure_at,
+                }
+                sources_map[article.source.id] = entry
             if primary_url is None:
                 primary_url = article.url
         articles_out.append(
@@ -306,6 +309,30 @@ async def scraper_runs(source_id: int, limit: int = 50, db: AsyncSession = Depen
         .limit(min(limit, 200))
     )
     return {"runs": [RunOut.model_validate(r).model_dump(mode="json") for r in result.scalars()]}
+
+
+@router.get("/scrapers/{source_id}/articles")
+async def scraper_articles(source_id: int, limit: int = 50, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Article)
+        .where(Article.source_id == source_id)
+        .order_by(Article.scraped_at.desc())
+        .limit(min(limit, 200))
+    )
+    articles = result.scalars()
+    return {
+        "articles": [
+            {
+                "id": a.id,
+                "title": a.title,
+                "url": a.url,
+                "summary": a.summary,
+                "published_at": a.published_at,
+                "scraped_at": a.scraped_at,
+            }
+            for a in articles
+        ]
+    }
 
 
 @router.get("/scrapers/{source_id}/healing-history")

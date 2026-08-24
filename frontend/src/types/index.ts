@@ -53,6 +53,7 @@ export interface EventSourceRef {
   id: number | string;
   name?: string | null;
   url?: string | null;
+  article_url?: string | null;
   [key: string]: unknown;
 }
 
