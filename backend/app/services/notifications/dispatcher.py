@@ -74,6 +74,45 @@ def build_event_payload(event: MarketEvent, source_names: list[str], primary_url
     }
 
 
+async def _claim_notification(session: AsyncSession, event_id: int, channel: str, user_id: int | None) -> bool:
+    """Atomically claim delivery of one notification.
+
+    Inserts a QUEUED row guarded by the partial unique index
+    uq_notifications_once — if another process already claimed/sent this
+    (event, channel, recipient), the insert conflicts and we return False.
+    This makes concurrent dispatches (worker + scheduler) safe.
+    """
+    from sqlalchemy import text
+
+    result = await session.execute(
+        text(
+            "INSERT INTO notifications (user_id, event_id, channel, status) "
+            "VALUES (:uid, :eid, :ch, 'QUEUED') "
+            "ON CONFLICT (event_id, channel, COALESCE(user_id, -1)) DO NOTHING "
+            "RETURNING id"
+        ),
+        {"uid": user_id, "eid": event_id, "ch": channel},
+    )
+    return result.scalar() is not None
+
+
+async def _mark_sent(session: AsyncSession, event_id: int, channel: str, user_id: int | None, ok: bool, err: str | None):
+    from sqlalchemy import text
+
+    await session.execute(
+        text(
+            "UPDATE notifications SET status=:st, error=:err, sent_at=:at "
+            "WHERE event_id=:eid AND channel=:ch AND COALESCE(user_id,-1)=COALESCE(:uid,-1)"
+        ),
+        {
+            "st": "SENT" if ok else "FAILED",
+            "err": err,
+            "at": datetime.now(timezone.utc) if ok else None,
+            "eid": event_id, "ch": channel, "uid": user_id,
+        },
+    )
+
+
 async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> int:
     """Send notifications for a completed event according to user prefs.
     Returns count of successfully sent notifications."""
@@ -105,18 +144,6 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
         if not user_wants(pref, event, asset_symbols):
             continue
 
-        # dedupe: never send the same event twice to the same user/channel
-        already = await session.execute(
-            select(Notification.id).where(
-                Notification.user_id == user.id,
-                Notification.event_id == event.id,
-                Notification.channel == "telegram",
-                Notification.status.in_(["SENT", "QUEUED"]),
-            )
-        )
-        if already.scalar() is not None:
-            continue
-
         payload = build_event_message_context(event, assets)
 
         # telegram: only real bot subscribers (a None chat would fall back
@@ -126,9 +153,11 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
             and (pref is None or pref.telegram_enabled)
             and telegram_configured()
         ):
-            ok, err = await _send_telegram_for_user(session, user, event, payload)
-            if ok:
-                sent += 1
+            if await _claim_notification(session, event.id, "telegram", user.id):
+                ok, err = await _send_telegram_for_user(session, user, event, payload)
+                await _mark_sent(session, event.id, "telegram", user.id, ok, err)
+                if ok:
+                    sent += 1
 
         if (
             (pref is None or pref.email_enabled)
@@ -136,17 +165,12 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
             and user.email
             and not user.email.endswith("@subscribers.sunrise.local")
         ):
-            text = format_event_message(payload)
-            ok, err = send_email(user.email, f"Sunrise — {payload['level']}: {event.headline[:80]}", text)
-            session.add(
-                Notification(
-                    user_id=user.id, event_id=event.id, channel="email",
-                    status="SENT" if ok else "FAILED", error=err or None,
-                    sent_at=datetime.now(timezone.utc) if ok else None,
-                )
-            )
-            if ok:
-                sent += 1
+            if await _claim_notification(session, event.id, "email", user.id):
+                text = format_event_message(payload)
+                ok, err = send_email(user.email, f"Sunrise — {payload['level']}: {event.headline[:80]}", text)
+                await _mark_sent(session, event.id, "email", user.id, ok, err)
+                if ok:
+                    sent += 1
 
     # owner's default chat from env — always receives critical+ events,
     # skipped if the owner also subscribed via the bot (would double-send)
@@ -155,18 +179,13 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
             u.telegram_chat_id == settings.telegram_chat_id for u in users
         )
         if not users or not owner_is_subscriber:
-            payload = build_event_message_context(event, assets)
-            text = format_event_message(payload)
-            ok, err = await send_telegram(text)
-            session.add(
-                Notification(
-                    event_id=event.id, channel="telegram",
-                    status="SENT" if ok else "FAILED", error=err or None,
-                    sent_at=datetime.now(timezone.utc) if ok else None,
-                )
-            )
-            if ok:
-                sent += 1
+            if await _claim_notification(session, event.id, "telegram", None):
+                payload = build_event_message_context(event, assets)
+                text = format_event_message(payload)
+                ok, err = await send_telegram(text)
+                await _mark_sent(session, event.id, "telegram", None, ok, err)
+                if ok:
+                    sent += 1
 
     await session.commit()
     log.info("notifications.dispatched", event=event_id, sent=sent)
