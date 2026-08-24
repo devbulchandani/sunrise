@@ -88,7 +88,7 @@ async def _claim_notification(session: AsyncSession, event_id: int, channel: str
         text(
             "INSERT INTO notifications (user_id, event_id, channel, status) "
             "VALUES (:uid, :eid, :ch, 'QUEUED') "
-            "ON CONFLICT (event_id, channel, COALESCE(CAST(:uid AS INTEGER), -1)) DO NOTHING "
+            "ON CONFLICT (event_id, channel, COALESCE(user_id, -1)) DO NOTHING "
             "RETURNING id"
         ),
         {"uid": user_id, "eid": event_id, "ch": channel},
