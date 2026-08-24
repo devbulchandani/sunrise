@@ -105,14 +105,37 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
         if not user_wants(pref, event, asset_symbols):
             continue
 
+        # dedupe: never send the same event twice to the same user/channel
+        already = await session.execute(
+            select(Notification.id).where(
+                Notification.user_id == user.id,
+                Notification.event_id == event.id,
+                Notification.channel == "telegram",
+                Notification.status.in_(["SENT", "QUEUED"]),
+            )
+        )
+        if already.scalar() is not None:
+            continue
+
         payload = build_event_message_context(event, assets)
 
-        if pref is None or pref.telegram_enabled:
+        # telegram: only real bot subscribers (a None chat would fall back
+        # to the owner's env chat and cause duplicate deliveries)
+        if (
+            user.telegram_chat_id
+            and (pref is None or pref.telegram_enabled)
+            and telegram_configured()
+        ):
             ok, err = await _send_telegram_for_user(session, user, event, payload)
             if ok:
                 sent += 1
 
-        if (pref is None or pref.email_enabled) and email_configured() and user.email:
+        if (
+            (pref is None or pref.email_enabled)
+            and email_configured()
+            and user.email
+            and not user.email.endswith("@subscribers.sunrise.local")
+        ):
             text = format_event_message(payload)
             ok, err = send_email(user.email, f"Sunrise — {payload['level']}: {event.headline[:80]}", text)
             session.add(
