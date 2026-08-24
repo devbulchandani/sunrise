@@ -120,6 +120,16 @@ SEED_SOURCES = [
         "strategy": {"fields": {}},
     },
     {
+        "slug": "tradingview",
+        "name": "TradingView Top Stories",
+        "url": "https://www.tradingview.com/news/top-stories/all/",
+        "type": "tradingview",
+        "schedule": "*/10 * * * *",
+        "category": "MARKET_MOVEMENT",
+        "credibility": 0.85,
+        "strategy": {"fields": {}},
+    },
+    {
         "slug": "investing_commodities",
         "name": "Investing.com Commodities",
         "url": "https://www.investing.com/rss/news_11.rss",
