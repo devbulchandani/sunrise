@@ -120,7 +120,7 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
                 analysis.category,
             )
             if context:
-                refined = await refine_with_context(analysis, context)
+                # store the research even if the refinement pass is throttled
                 market_context = {
                     "queries": context["queries"],
                     "results": [
@@ -128,10 +128,12 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
                         for r in context["results"]
                     ],
                 }
-                analysis = refined
-                log.info("analysis.refined_with_context", event=event.id, results=len(context["results"]))
-        except LLMError as exc:
-            log.warn("analysis.context_llm_error", event=event.id, error=str(exc)[:150])
+                try:
+                    analysis = await refine_with_context(analysis, context)
+                    log.info("analysis.refined_with_context", event=event.id, results=len(context["results"]))
+                except (LLMError, Exception) as exc:
+                    # keep first-pass analysis; context is still valuable
+                    log.warn("analysis.refine_skipped", event=event.id, error=str(exc)[:150])
         except Exception as exc:
             log.warn("analysis.context_error", event=event.id, error=str(exc)[:150])
 
