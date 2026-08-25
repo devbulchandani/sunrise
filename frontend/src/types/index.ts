@@ -24,6 +24,11 @@ export interface MarketEvent {
   affected_markets?: string[] | null;
 }
 
+export interface MarketContext {
+  queries?: string[];
+  results?: { title?: string; url?: string; snippet?: string; query?: string }[];
+}
+
 export interface IPIOResearch {
   company_name: string;
   ticker?: string;
@@ -71,6 +76,7 @@ export interface EventDetail extends MarketEvent {
   reason?: string | null;
   affected_markets?: string[] | null;
   ipo_research?: IPIOResearch | null;
+  market_context?: MarketContext | null;
   affected_assets?: AffectedAsset[] | null;
   sources?: EventSourceRef[] | null;
   articles?: Article[] | null;

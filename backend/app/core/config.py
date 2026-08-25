@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     min_request_interval_seconds: float = 3.0
     snapshot_retention_per_source: int = 5
 
+    # run live market-context research for events at/above this urgency
+    market_research_min_urgency: int = 50
+
     # healing thresholds
     heal_after_consecutive_failures: int = 2
     min_healing_score: float = 70.0

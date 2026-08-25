@@ -81,6 +81,12 @@ def format_event_message(event: dict) -> str:
             lines.append("Considerations: " + considerations[0][:200])
         lines.append("")
 
+    ctx = event.get("market_context")
+    if ctx and ctx.get("queries"):
+        lines.append("MARKET CONTEXT (live research)")
+        lines.append(f"  verified via: {', '.join(ctx['queries'][:3])}")
+        lines.append("")
+
     if event.get("reason"):
         lines.append("WHY IT MAY MATTER (AI interpretation)")
         # wrap at ~70 chars

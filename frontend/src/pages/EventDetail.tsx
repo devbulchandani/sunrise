@@ -137,6 +137,33 @@ export default function EventDetail() {
             </div>
           </section>
 
+          {/* MARKET CONTEXT — live research */}
+          {event.market_context?.results?.length ? (
+            <section>
+              <SectionLabel>Market Context — Live Research</SectionLabel>
+              <Card>
+                <p className="font-mono text-[11px] text-ink-dim">
+                  verified via: {event.market_context.queries?.join(" · ")}
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {event.market_context.results.slice(0, 6).map((r, i) => (
+                    <li key={i}>
+                      <a
+                        href={r.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs leading-relaxed text-ink-dim transition-colors hover:text-ink"
+                      >
+                        <span className="text-ink">{r.title || r.url}</span>
+                        {r.snippet ? <span className="text-ink-faint"> — {r.snippet.slice(0, 160)}</span> : null}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </section>
+          ) : null}
+
           {/* IPO RESEARCH */}
           {event.ipo_research ? (
             <section>

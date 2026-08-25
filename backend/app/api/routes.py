@@ -179,6 +179,7 @@ async def event_detail(event_id: int, db: AsyncSession = Depends(get_db)):
             "reason": event.reason,
             "affected_markets": list(event.affected_markets or []),
             "ipo_research": event.ipo_research,
+            "market_context": event.market_context,
             "affected_assets": [
                 {"symbol": a.symbol, "impact": a.impact, "confidence": a.confidence} for a in assets
             ],
