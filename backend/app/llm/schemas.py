@@ -59,6 +59,19 @@ class MarketAnalysis(BaseModel):
         v = v.upper().strip()
         return v if v in EVENT_CATEGORIES else "OTHER"
 
+    @field_validator("affected_assets", mode="before")
+    @classmethod
+    def coerce_asset_entries(cls, v):
+        """Smaller models sometimes emit ["SPY", ...] instead of full objects;
+        coerce strings into neutral-impact entries instead of failing validation."""
+        if not isinstance(v, list):
+            return v
+        return [
+            {"symbol": str(item).strip()[:16], "impact": "neutral", "confidence": 50}
+            if isinstance(item, str) else item
+            for item in v
+        ]
+
 
 class ExtractionField(BaseModel):
     method: Literal["css", "xpath", "jsonld", "og", "semantic"]
