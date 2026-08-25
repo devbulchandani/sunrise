@@ -105,9 +105,23 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
         await session.commit()
         return event
 
+    best_credibility = max(
+        (a.source.credibility if a.source else 0.5) for a in articles
+    )
+    urgency = compute_urgency(
+        ai_urgency=analysis.urgency,
+        source_credibility=best_credibility,
+        category=analysis.category,
+        article_count=len(articles),
+        affected_asset_count=len(analysis.affected_assets),
+        market_impact=analysis.market_impact,
+    )
+
     # ---- research pass: ground the analysis in current market state ----
+    # gated on the BLENDED urgency (computed above), and the urgency is
+    # recomputed after refinement since the refined analysis may differ
     market_context = None
-    if analysis.urgency >= settings.market_research_min_urgency and tools_available():
+    if urgency >= settings.market_research_min_urgency and tools_available():
         try:
             from app.services.analysis.market_research import (
                 gather_market_context,
@@ -130,24 +144,20 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
                 }
                 try:
                     analysis = await refine_with_context(analysis, context)
+                    urgency = compute_urgency(
+                        ai_urgency=analysis.urgency,
+                        source_credibility=best_credibility,
+                        category=analysis.category,
+                        article_count=len(articles),
+                        affected_asset_count=len(analysis.affected_assets),
+                        market_impact=analysis.market_impact,
+                    )
                     log.info("analysis.refined_with_context", event=event.id, results=len(context["results"]))
                 except (LLMError, Exception) as exc:
                     # keep first-pass analysis; context is still valuable
                     log.warn("analysis.refine_skipped", event=event.id, error=str(exc)[:150])
         except Exception as exc:
             log.warn("analysis.context_error", event=event.id, error=str(exc)[:150])
-
-    best_credibility = max(
-        (a.source.credibility if a.source else 0.5) for a in articles
-    )
-    urgency = compute_urgency(
-        ai_urgency=analysis.urgency,
-        source_credibility=best_credibility,
-        category=analysis.category,
-        article_count=len(articles),
-        affected_asset_count=len(analysis.affected_assets),
-        market_impact=analysis.market_impact,
-    )
 
     # first analysis sets the headline; later ones keep the original but refresh scores
     if len(articles) == 1:
