@@ -61,7 +61,9 @@ Every source has a **versioned extraction strategy** stored in Postgres — pure
 
 ## Data sources
 
-8 public sources seeded by default: Federal Reserve press releases (HTML), ECB press RSS, Bank of England RSS, Cointelegraph, CoinDesk, Yahoo Finance, Investing.com commodities — plus **MarketWatch via Bright Data** (see below). All public pages, robots.txt respected, rate-limited per host.
+11 public sources seeded by default: Federal Reserve press releases (HTML), ECB press RSS, Bank of England RSS, Cointelegraph, CoinDesk, Yahoo Finance, Investing.com commodities, **TradingView Top Stories**, **Economic Times Markets (India)**, **LiveMint Markets (India)** — plus **MarketWatch via Bright Data** (see below). All public pages, robots.txt respected, rate-limited per host.
+
+**TradingView** is fully client-rendered, but the article list ships server-side inside `<script type="application/prs.init-data+json">` tags — the `tradingview` source type walks those scripts and extracts the news items JSON directly (title, link, storyPath, published timestamp).
 
 ## Bright Data integration (Web Unlocker)
 
@@ -172,6 +174,16 @@ final = 0.55*AI_urgency + 0.15*source_credibility + 0.10*category_weight
 
 Telegram pushes at ≥61; user preferences can raise the floor or filter by asset/category.
 
+## Agentic IPO research
+
+Events categorized as `IPO` automatically trigger a multi-step research agent after standard analysis:
+
+1. **Extract** — company name, ticker, exchange and IPO terms from the event's articles
+2. **Research** — the agent issues `search()` (Bright Data SERP) and `fetch()` (Web Unlocker) tool calls, up to 3 rounds, to gather public information about the company
+3. **Synthesize** — a structured due-diligence brief: company overview, business model, key financials, strengths, risks, valuation notes, use of proceeds, and "considerations"
+
+The brief is stored on the event (`ipo_research`), rendered in the dashboard's **IPO Deep-Dive** section, and summarized in Telegram alerts. Every output is labeled AI interpretation with confidence and sources — the pipeline never recommends buying, and degrades honestly (marking claims `unverified`) when web tools are rate-limited.
+
 ## Deployment
 
 | Component | Host | Notes |
@@ -222,6 +234,7 @@ GET  /api/health                     GET  /api/events (?min_urgency=&level=&cate
 GET  /api/events/{id}                GET  /api/sources
 GET  /api/scrapers/health            GET  /api/scrapers/{id}/runs
 GET  /api/scrapers/{id}/healing-history
+GET  /api/scrapers/{id}/articles    (recent articles per collector)
 POST /api/scrapers/{id}/run          POST /api/scrapers/{id}/heal
 GET  /api/stats                      GET  /api/stream   (SSE live updates)
 GET  /api/preferences                PUT  /api/preferences
