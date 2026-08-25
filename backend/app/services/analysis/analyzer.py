@@ -8,8 +8,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.services.analysis.tools import tools_available
 from app.core.redis import publish, get_redis, CHANNELS
-from app.llm.client import get_llm
+from app.llm.client import LLMError, get_llm
 from app.llm.schemas import MarketAnalysis
 from app.models.models import Article, EventAsset, MarketEvent, Source, utcnow
 from app.services.analysis.clustering import attach_article
@@ -104,6 +105,36 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
         await session.commit()
         return event
 
+    # ---- research pass: ground the analysis in current market state ----
+    market_context = None
+    if analysis.urgency >= settings.market_research_min_urgency and tools_available():
+        try:
+            from app.services.analysis.market_research import (
+                gather_market_context,
+                refine_with_context,
+            )
+
+            context = await gather_market_context(
+                event.headline,
+                [a.symbol for a in analysis.affected_assets],
+                analysis.category,
+            )
+            if context:
+                refined = await refine_with_context(analysis, context)
+                market_context = {
+                    "queries": context["queries"],
+                    "results": [
+                        {"title": r["title"], "url": r["url"], "snippet": r["snippet"][:300], "query": r["query"]}
+                        for r in context["results"]
+                    ],
+                }
+                analysis = refined
+                log.info("analysis.refined_with_context", event=event.id, results=len(context["results"]))
+        except LLMError as exc:
+            log.warn("analysis.context_llm_error", event=event.id, error=str(exc)[:150])
+        except Exception as exc:
+            log.warn("analysis.context_error", event=event.id, error=str(exc)[:150])
+
     best_credibility = max(
         (a.source.credibility if a.source else 0.5) for a in articles
     )
@@ -139,6 +170,7 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
     event.confidence = analysis.confidence
     event.reason = analysis.reason
     event.affected_markets = analysis.affected_markets
+    event.market_context = market_context
     event.urgency = urgency
     event.analysis_status = "DONE"
     event.last_updated_at = utcnow()

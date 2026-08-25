@@ -51,6 +51,7 @@ class MarketAnalysis(BaseModel):
     affected_regions: list[str] = Field(default_factory=list, max_length=10)
     affected_markets: list[str] = Field(default_factory=list, max_length=8)
     reason: str = Field(min_length=5, max_length=3000)
+    market_context_note: str = Field(default="", max_length=1500)
 
     @field_validator("category")
     @classmethod

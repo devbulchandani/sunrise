@@ -206,6 +206,7 @@ def build_event_message_context(event: MarketEvent, assets) -> dict:
         "reason": event.reason or "",
         "markets": event.affected_markets or [],
         "ipo": getattr(event, "ipo_research", None),
+        "market_context": getattr(event, "market_context", None),
         "assets": [
             {"symbol": a.symbol, "impact": a.impact} for a in assets
         ],

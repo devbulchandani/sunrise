@@ -70,63 +70,8 @@ class IPIOResearch(BaseModel):
 # ---------------------------------------------------------------- tools
 
 
-def _tool_search(query: str, max_results: int = 5) -> list[dict]:
-    """Bright Data SERP search via bdata CLI. Returns [{title, url}]."""
-    import json
-    import shutil
-    import subprocess
-
-    binary = shutil.which("bdata") or shutil.which("brightdata")
-    if not binary:
-        return []
-    try:
-        result = subprocess.run(
-            [binary, "search", query, "--format", "json"],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode != 0:
-            return []
-        data = json.loads(result.stdout)
-        items = data if isinstance(data, list) else data.get("results") or data.get("organic") or []
-        out = []
-        for item in items[:max_results]:
-            if isinstance(item, dict) and item.get("url"):
-                out.append({
-                    "title": str(item.get("title") or item.get("name") or "")[:200],
-                    "url": str(item.get("url") or item.get("link") or ""),
-                    "snippet": str(item.get("description") or item.get("snippet") or "")[:400],
-                })
-        return out
-    except Exception as exc:
-        log.warn("ipo.search_failed", error=str(exc)[:150])
-        return []
-
-
-def _tool_fetch(url: str, max_chars: int = 6000) -> str:
-    """Fetch a page's text via Bright Data Web Unlocker (markdown)."""
-    import shutil
-    import subprocess
-
-    binary = shutil.which("bdata") or shutil.which("brightdata")
-    if not binary:
-        return ""
-    try:
-        result = subprocess.run(
-            [binary, "scrape", url, "--format", "markdown"],
-            capture_output=True, text=True, timeout=90,
-        )
-        if result.returncode != 0:
-            return ""
-        return result.stdout[:max_chars]
-    except Exception as exc:
-        log.warn("ipo.fetch_failed", url=url[:80], error=str(exc)[:150])
-        return ""
-
-
-def tools_available() -> bool:
-    import shutil
-
-    return bool(shutil.which("bdata") or shutil.which("brightdata"))
+from app.services.analysis.tools import fetch_page as _tool_fetch
+from app.services.analysis.tools import tools_available, web_search as _tool_search
 
 
 # ---------------------------------------------------------------- pipeline
