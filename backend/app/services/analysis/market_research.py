@@ -99,6 +99,6 @@ async def refine_with_context(analysis, context: dict):
         REFINE_SYSTEM,
         f"FIRST-PASS ANALYSIS JSON:\n{analysis.model_dump_json()}\n\n"
         f"FRESH MARKET RESEARCH:\n{research_block[:6000]}",
-        max_tokens=3000,
+        max_tokens=2000,
     )
     return refined

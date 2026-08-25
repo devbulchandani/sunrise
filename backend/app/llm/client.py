@@ -93,7 +93,7 @@ class LLMClient:
     def configured(self) -> bool:
         return bool(self.settings.llm_api_key)
 
-    async def complete(self, system: str, user: str, max_tokens: int = 4000) -> str:
+    async def complete(self, system: str, user: str, max_tokens: int = 2000) -> str:
         if not self.configured:
             raise LLMError("LLM_API_KEY not configured")
         if self.settings.llm_provider == "anthropic":
@@ -127,6 +127,8 @@ class LLMClient:
                 data = resp.json()
                 return data["choices"][0]["message"]["content"]
             last_error = f"LLM HTTP {resp.status_code}: {resp.text[:300]}"
+            if resp.status_code == 402:
+                log.error("llm.credits_exhausted", hint="top up at https://openrouter.ai/settings")
             if resp.status_code == 429 and attempt < 2:
                 wait = 10 * (attempt + 1)
                 log.warn("llm.rate_limited", retry_in=wait)
@@ -156,7 +158,7 @@ class LLMClient:
         return "".join(block.get("text", "") for block in data.get("content", []))
 
     async def structured(
-        self, schema: type[T], system: str, user: str, max_tokens: int = 4000
+        self, schema: type[T], system: str, user: str, max_tokens: int = 2000
     ) -> T:
         raw = await self.complete(system, user, max_tokens=max_tokens)
         try:
