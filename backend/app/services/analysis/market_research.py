@@ -48,29 +48,27 @@ class ContextQueries(BaseModel):
 
 
 async def gather_market_context(headline: str, affected_assets: list[str], category: str) -> dict | None:
-    """Run the research step. Returns {'queries', 'results'} or None."""
+    """Run the research step. Returns {'queries', 'results'} or None.
+
+    Queries are built deterministically from the event's assets/category so
+    the research step never depends on LLM availability (only the refinement
+    pass does).
+    """
     if not tools_available():
         log.info("context.no_tools")
         return None
-    llm = get_llm()
-    if not llm.configured:
-        return None
 
-    try:
-        q = await llm.structured(
-            ContextQueries,
-            QUERY_SYSTEM,
-            f"EVENT: {headline}\nCATEGORY: {category}\nAFFECTED ASSETS: {affected_assets or 'unknown'}",
-            max_tokens=300,
-        )
-    except LLMError as exc:
-        log.warn("context.queries_failed", error=str(exc)[:150])
-        return None
-    if not q.queries:
-        return None
+    queries: list[str] = []
+    for asset in affected_assets[:2]:
+        queries.append(f"{asset} price today current level")
+    if category:
+        queries.append(f"{category.lower().replace('_', ' ')} market news this week")
+    if not queries:
+        queries.append("stock market today major indices")
+    queries = queries[:3]
 
     results: list[dict] = []
-    for query in q.queries:
+    for query in queries:
         for r in web_search(query, max_results=4):
             results.append({"query": query, **r})
 
@@ -81,8 +79,12 @@ async def gather_market_context(headline: str, affected_assets: list[str], categ
         if page:
             results.append({"query": "fetched page", "title": top, "url": top, "snippet": page[:1500]})
 
-    log.info("context.gathered", queries=q.queries, results=len(results))
-    return {"queries": q.queries, "results": results[:12]}
+    if not results:
+        log.warn("context.no_results", queries=queries)
+        return None
+
+    log.info("context.gathered", queries=queries, results=len(results))
+    return {"queries": queries, "results": results[:12]}
 
 
 async def refine_with_context(analysis, context: dict):
