@@ -32,6 +32,8 @@ def _extract_json(text: str | None) -> Any:
     if not text or not text.strip():
         raise LLMError("LLM returned an empty response (possibly rate limited)")
     text = text.strip()
+    # reasoning models may emit <think>...</think> blocks; drop them first
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     # strip markdown fences
     fence = re.search(r"```(?:json)?\s*(.+?)\s*```", text, re.DOTALL)
     if fence:
@@ -96,6 +98,10 @@ class LLMClient:
     async def complete(self, system: str, user: str, max_tokens: int = 2000) -> str:
         if not self.configured:
             raise LLMError("LLM_API_KEY not configured")
+        if self.settings.llm_no_think and not system.startswith("/no_think"):
+            # Nemotron-style reasoning models: /no_think keeps the whole token
+            # budget for the actual answer instead of burning it on chain-of-thought
+            system = "/no_think\n" + system
         if self.settings.llm_provider == "anthropic":
             return await self._complete_anthropic(system, user, max_tokens)
         return await self._complete_openai(system, user, max_tokens)
@@ -114,6 +120,10 @@ class LLMClient:
                 {"role": "user", "content": user},
             ],
         }
+        if self.settings.llm_no_think:
+            # NVIDIA NIM reasoning models (Nemotron family): disable
+            # chain-of-thought so the budget goes to the actual answer
+            payload["chat_template_kwargs"] = {"thinking": False}
         headers = {"Authorization": f"Bearer {self.settings.llm_api_key}"}
         import asyncio as _asyncio
 
@@ -126,6 +136,11 @@ class LLMClient:
             if resp.status_code == 200:
                 data = resp.json()
                 return data["choices"][0]["message"]["content"]
+            if resp.status_code in (400, 422) and "chat_template_kwargs" in payload:
+                # gateway rejected the NIM-specific toggle — retry plain
+                log.warn("llm.think_toggle_rejected", status=resp.status_code)
+                payload = {k: v for k, v in payload.items() if k != "chat_template_kwargs"}
+                continue
             last_error = f"LLM HTTP {resp.status_code}: {resp.text[:300]}"
             if resp.status_code == 402:
                 log.error("llm.credits_exhausted", hint="top up at https://openrouter.ai/settings")
@@ -162,10 +177,23 @@ class LLMClient:
     ) -> T:
         raw = await self.complete(system, user, max_tokens=max_tokens)
         try:
-            pass
             return schema.model_validate(_extract_json(raw))
         except ValidationError as exc:
             raise LLMError(f"LLM output failed schema validation: {exc}") from exc
+        except LLMError:
+            # likely a reasoning model that spent the budget thinking and
+            # truncated its JSON — retry once with double headroom
+            raw2 = await self.complete(
+                system + "\nSkip all reasoning. Output ONLY the JSON object.",
+                user,
+                max_tokens=max_tokens * 2,
+            )
+            try:
+                return schema.model_validate(_extract_json(raw2))
+            except (ValidationError, LLMError) as exc2:
+                raise LLMError(
+                    f"structured output failed after retry ({exc2})"
+                ) from exc2
 
 
 _client: LLMClient | None = None

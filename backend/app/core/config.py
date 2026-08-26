@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = ""  # optional OpenAI-compatible gateway (OpenRouter, NIM, ...)
+    llm_no_think: bool = False  # prepend /no_think for Nemotron-style reasoning models
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
