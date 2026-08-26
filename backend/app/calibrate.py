@@ -17,6 +17,7 @@ import os
 import statistics
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
@@ -46,6 +47,9 @@ async def _score_events(limit: int) -> list[dict]:
         result = await session.execute(
             select(MarketEvent)
             .where(MarketEvent.analysis_status == "DONE")
+            .options(
+                selectinload(MarketEvent.articles).selectinload("source")
+            )
             .order_by(MarketEvent.last_updated_at.desc())
             .limit(limit)
         )
