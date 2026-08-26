@@ -24,7 +24,7 @@ from app.core.logging import setup_logging
 from app.db.session import get_session_factory
 from app.llm.client import LLMError, get_llm
 from app.llm.schemas import MarketAnalysis
-from app.models.models import MarketEvent
+from app.models.models import Article, MarketEvent
 from app.services.analysis.analyzer import SYSTEM_PROMPT, _build_user_prompt
 
 setup_logging()
@@ -48,7 +48,7 @@ async def _score_events(limit: int) -> list[dict]:
             select(MarketEvent)
             .where(MarketEvent.analysis_status == "DONE")
             .options(
-                selectinload(MarketEvent.articles).selectinload("source")
+                selectinload(MarketEvent.articles).selectinload(Article.source)
             )
             .order_by(MarketEvent.last_updated_at.desc())
             .limit(limit)
