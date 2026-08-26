@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     heal_after_consecutive_failures: int = 2
     min_healing_score: float = 70.0
 
+    # ops alerting: Telegram the owner when pipeline failures spike
+    ops_alert_failure_threshold: int = 5
+    ops_alert_window_minutes: int = 10
+    ops_alert_cooldown_minutes: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:
