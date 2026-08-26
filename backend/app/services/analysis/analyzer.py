@@ -101,6 +101,9 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
         )
     except Exception as exc:
         log.warn("analysis.failed", event=event.id, error=str(exc)[:200])
+        from app.services.notifications.ops_alerts import record_analysis_failure
+
+        await record_analysis_failure("LLM analysis", str(exc))
         event.analysis_status = "PENDING"  # retry later
         await session.commit()
         return event
