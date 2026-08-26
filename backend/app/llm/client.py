@@ -129,7 +129,7 @@ class LLMClient:
 
         last_error = "unknown"
         for attempt in range(3):
-            async with httpx.AsyncClient(timeout=180) as client:
+            async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(
                     f"{base}/chat/completions", json=payload, headers=headers
                 )
