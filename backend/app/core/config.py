@@ -13,10 +13,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://sunrise:sunrise@localhost:5432/sunrise"
     redis_url: str = "redis://localhost:6379"
 
-    llm_provider: str = "openai"  # openai | anthropic
+    llm_provider: str = "openai"  # openai | anthropic | bedrock
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = ""  # optional OpenAI-compatible gateway (OpenRouter, NIM, ...)
+    llm_bedrock_region: str = "us-east-1"
     llm_no_think: bool = False  # prepend /no_think for Nemotron-style reasoning models
 
     telegram_bot_token: str = ""
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     request_timeout: float = 25.0
     min_request_interval_seconds: float = 3.0
     snapshot_retention_per_source: int = 5
+    article_retention_days: int = 30
 
     # run live market-context research for events at/above this urgency
     market_research_min_urgency: int = 50
