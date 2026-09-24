@@ -1,6 +1,6 @@
 # Sunrise trading execution: next phase plan
 
-Status: in progress. Cognito identity foundation is provisioned; broker integration is not connected and no orders can be submitted.
+Status: in progress. Cognito identity foundation is provisioned and deployed; broker integration is not connected and no orders can be submitted.
 
 ## Current project state
 
@@ -27,6 +27,8 @@ Sunrise scrapes market news, clusters articles, analyzes events through an LLM, 
 **Exit criteria:** authenticated identities; deny-by-default trading permission; documented ownership mapping; no public path to account/order data; audited access; explicit `TRADING_ENABLED=false` kill switch.
 
 **Progress:** Created Cognito user pool `us-east-1_V7pzjzvij` in the selected `us-east-1` Region with open email sign-up, email verification, strong password policy, deletion protection, and required TOTP MFA. Created no-secret public SPA OAuth client `6l372ppaohfv233ojmgkhqf2k6` with authorization code + PKCE, 15-minute access/ID tokens, one-day refresh token, refresh rotation and token revocation. Managed-login v2 domain `sunrise-trading-v7pzjzvij.auth.us-east-1.amazoncognito.com` is ACTIVE. Dashboard OIDC wiring and backend JWT verification are implemented locally. The existing market-data API remains public. No user account or broker token has been created.
+
+**Deployed and verified:** Cognito managed-login branding is attached to the SPA client (`UseCognitoProvidedValues=true`). The dashboard build is deployed to `https://sunrise-dashboard.pages.dev`; the API/Worker production deployment was updated. Production health returned HTTP 200, `/api/auth/me` rejected an invalid bearer token with HTTP 401, and the Worker returned the configured Pages CORS origin and passed preflight. Thus signup/auth plumbing is live; no account-specific or trading data endpoints have been opened.
 
 ### Phase 1 — paper broker adapter and order ledger
 
@@ -75,7 +77,7 @@ Event analysis remains independent of trade state. A signal may create a draft p
 
 ## Decisions before implementation
 
-User decisions so far: open signup; multi-user target; India only; paper trading with manual confirmation for the first release. Still choose the launch broker/instruments (e.g. Upstox and NSE equities), and decide if/when to pursue broker onboarding for multi-user live access. Regardless, live mode stays disabled pending legal/broker review and a separate explicit launch decision.
+User decisions so far: open signup; multi-user target; India only; paper trading with manual confirmation for the first release. Upstox Sandbox is the documented initial connector candidate; the user has not named a broker or instruments, so no broker-specific adapter or order flow has been enabled. Live mode stays disabled pending legal/broker review and a separate explicit launch decision.
 
 ## Sources
 
