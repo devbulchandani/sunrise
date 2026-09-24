@@ -10,6 +10,8 @@ JSON output and parse through Pydantic schemas.
 
 import json
 import re
+import asyncio
+from functools import lru_cache
 from typing import Any, TypeVar
 
 import httpx
@@ -25,6 +27,23 @@ T = TypeVar("T", bound=BaseModel)
 
 class LLMError(Exception):
     pass
+
+
+@lru_cache(maxsize=4)
+def _bedrock_runtime(region: str):
+    """Use the runtime's default AWS credential chain (EC2 instance role in prod)."""
+    import boto3
+    from botocore.config import Config
+
+    return boto3.client(
+        "bedrock-runtime",
+        region_name=region,
+        config=Config(
+            retries={"total_max_attempts": 5, "mode": "adaptive"},
+            connect_timeout=5,
+            read_timeout=120,
+        ),
+    )
 
 
 def _extract_json(text: str | None) -> Any:
@@ -93,18 +112,55 @@ class LLMClient:
 
     @property
     def configured(self) -> bool:
+        if self.settings.llm_provider == "bedrock":
+            return True
         return bool(self.settings.llm_api_key)
 
     async def complete(self, system: str, user: str, max_tokens: int = 2000) -> str:
         if not self.configured:
             raise LLMError("LLM_API_KEY not configured")
-        if self.settings.llm_no_think and not system.startswith("/no_think"):
+        if (
+            self.settings.llm_provider != "bedrock"
+            and self.settings.llm_no_think
+            and not system.startswith("/no_think")
+        ):
             # Nemotron-style reasoning models: /no_think keeps the whole token
             # budget for the actual answer instead of burning it on chain-of-thought
             system = "/no_think\n" + system
         if self.settings.llm_provider == "anthropic":
             return await self._complete_anthropic(system, user, max_tokens)
+        if self.settings.llm_provider == "bedrock":
+            return await asyncio.to_thread(
+                self._complete_bedrock_sync, system, user, max_tokens
+            )
         return await self._complete_openai(system, user, max_tokens)
+
+    def _complete_bedrock_sync(self, system: str, user: str, max_tokens: int) -> str:
+        """Invoke Amazon Nova Micro through Bedrock Converse using the instance role."""
+        from botocore.exceptions import ClientError
+
+        client = _bedrock_runtime(self.settings.llm_bedrock_region)
+        try:
+            response = client.converse(
+                modelId=self.settings.llm_model,
+                system=[{"text": system}],
+                messages=[{"role": "user", "content": [{"text": user}]}],
+                inferenceConfig={
+                    "maxTokens": min(max_tokens, 4096),
+                    "temperature": 0.2,
+                },
+            )
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            code = error.get("Code", "BedrockError")
+            message = error.get("Message", "request failed")
+            raise LLMError(f"Bedrock {code}: {message[:300]}") from exc
+
+        blocks = response.get("output", {}).get("message", {}).get("content", [])
+        text = "".join(block.get("text", "") for block in blocks if "text" in block)
+        if not text.strip():
+            raise LLMError("Bedrock returned an empty response")
+        return text
 
     async def _complete_openai(self, system: str, user: str, max_tokens: int) -> str:
         base = (
@@ -144,9 +200,17 @@ class LLMClient:
             last_error = f"LLM HTTP {resp.status_code}: {resp.text[:300]}"
             if resp.status_code == 402:
                 log.error("llm.credits_exhausted", hint="top up at https://openrouter.ai/settings")
-            if resp.status_code == 429 and attempt < 2:
-                wait = 10 * (attempt + 1)
-                log.warn("llm.rate_limited", retry_in=wait)
+            if resp.status_code in (429, 502, 503, 504) and attempt < 2:
+                retry_after = resp.headers.get("retry-after", "")
+                try:
+                    wait = min(max(float(retry_after), 1), 60)
+                except ValueError:
+                    wait = 10 * (attempt + 1)
+                log.warn(
+                    "llm.rate_limited" if resp.status_code == 429 else "llm.provider_unavailable",
+                    status=resp.status_code,
+                    retry_in=wait,
+                )
                 await _asyncio.sleep(wait)
                 continue
             break

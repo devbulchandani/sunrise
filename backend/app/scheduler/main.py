@@ -19,6 +19,7 @@ from app.services.analysis.clustering import find_or_create_event
 from app.services.healing.agent import heal_source
 from app.services.notifications.dispatcher import dispatch_event_notifications
 from app.services.analysis.analyzer import analyze_event
+from app.services.retention import purge_expired_articles
 
 setup_logging()
 log = get_logger("scheduler")
@@ -134,6 +135,16 @@ def source_schedule_str(trigger_args: dict) -> str:
 async def main() -> None:
     scheduler = AsyncIOScheduler(timezone="UTC")
     await refresh_jobs(scheduler)
+    await purge_expired_articles()
+    scheduler.add_job(
+        purge_expired_articles,
+        CronTrigger(hour=3, minute=15),
+        id="retention:articles",
+        name="purge expired articles",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
     scheduler.start()
     log.info("scheduler.started")
 
