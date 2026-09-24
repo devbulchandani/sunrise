@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api.routes import router
 from app.core.config import get_settings
@@ -19,6 +20,14 @@ async def lifespan(app: FastAPI):
     # ensure schema exists (idempotent; full seeding via `python -m app.seed`)
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all skips indexes when the table already exists, so ensure the
+        # notification idempotency index explicitly for existing deployments.
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_once "
+                "ON notifications (event_id, channel, (COALESCE(user_id, -1)))"
+            )
+        )
     yield
 
 
