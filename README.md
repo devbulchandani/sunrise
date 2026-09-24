@@ -138,8 +138,8 @@ See `.env.example`. Key ones:
 | `DATABASE_URL` | Postgres async DSN |
 | `REDIS_URL` | Redis for queues/pubsub/cache |
 | `LLM_PROVIDER` | `openai` (OpenAI-compatible endpoint), `bedrock`, or `anthropic` |
-| `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite; Amazon Bedrock uses `LLM_PROVIDER=bedrock`, a Bedrock model ID, and the EC2 instance role in production |
-| `LLM_API_KEY` | Provider key for OpenAI-compatible/Anthropic backends; when `LLM_PROVIDER=bedrock`, it can hold a Bedrock bearer API key for local use |
+| `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite. Bedrock Mantle uses `openai.gpt-oss-20b` and `https://bedrock-mantle.us-east-1.api.aws/v1` |
+| `LLM_API_KEY` | Provider key. For Bedrock Mantle, use the Bedrock bearer API key; it is sent as an `Authorization: Bearer` token |
 | `LLM_BEDROCK_REGION` | Bedrock selected Region; defaults to `us-east-1` |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
@@ -195,7 +195,7 @@ The brief is stored on the event (`ipo_research`), rendered in the dashboard's *
 | API proxy | Cloudflare Worker | `sunrise-api-proxy`; origin is `http://52.7.157.152.sslip.io:8000` |
 | Backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small`, `us-east-1` | Instance `i-04187b97cb6a30803`; one instance via `docker-compose.aws.yml` |
 
-The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. The EC2 host has no SSH ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values. For Bedrock, set `LLM_PROVIDER=bedrock`, `LLM_MODEL` to an enabled model ID, and `LLM_BEDROCK_REGION` to the project's selected Region; the EC2 role needs `bedrock:InvokeModel` permission for that model. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
+The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. The EC2 host has no SSH ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values. Production currently calls Bedrock Mantle through the OpenAI-compatible client using `LLM_MODEL=openai.gpt-oss-20b`, `LLM_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/v1`, and a Bedrock bearer key in `LLM_API_KEY`. The alternative Bedrock Runtime Converse provider uses `LLM_PROVIDER=bedrock`, an enabled Bedrock model ID, and the EC2 instance role. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
 
 Inside the SSM session, update the checkout and restart the stack with:
 
