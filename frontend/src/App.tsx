@@ -6,6 +6,7 @@ import MarketPulse from "./pages/MarketPulse";
 import EventDetail from "./pages/EventDetail";
 import Scrapers from "./pages/Scrapers";
 import SystemPage from "./pages/System";
+import AuthCallback from "./pages/AuthCallback";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/events/:id" element={<EventDetail />} />
         <Route path="/scrapers" element={<Scrapers />} />
         <Route path="/system" element={<SystemPage />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="*" element={<MarketPulse />} />
       </Routes>
     </AppChrome>

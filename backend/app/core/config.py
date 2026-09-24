@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     llm_bedrock_region: str = "us-east-1"
     llm_no_think: bool = False  # prepend /no_think for Nemotron-style reasoning models
 
+    # Cognito protects future account/trading APIs; public market-data reads remain public.
+    cognito_region: str = "us-east-1"
+    cognito_user_pool_id: str = ""
+    cognito_app_client_id: str = ""
+    trading_enabled: bool = False
+
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
