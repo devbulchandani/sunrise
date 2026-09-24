@@ -137,9 +137,11 @@ See `.env.example`. Key ones:
 |---|---|
 | `DATABASE_URL` | Postgres async DSN |
 | `REDIS_URL` | Redis for queues/pubsub/cache |
-| `LLM_PROVIDER` | `openai` (any compatible endpoint) or `anthropic` |
-| `LLM_API_KEY` / `LLM_MODEL` / `LLM_BASE_URL` | LLM config; base URL enables OpenRouter/NIM gateways |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram alerts (optional; app works without) |
+| `LLM_PROVIDER` | `openai` (OpenAI-compatible endpoint), `bedrock`, or `anthropic` |
+| `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite; Amazon Bedrock uses `LLM_PROVIDER=bedrock`, a Bedrock model ID, and the EC2 instance role (no Bedrock API key) |
+| `LLM_BEDROCK_REGION` | Bedrock selected Region; defaults to `us-east-1` |
+| `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
 | `SMTP_*` / `EMAIL_FROM` | Email digests (optional) |
 | `DEMO_MODE` | Enables demo break/heal commands |
 | `ADMIN_TOKEN` | If set, required as `X-Admin-Token` on debug endpoints |
@@ -188,21 +190,23 @@ The brief is stored on the event (`ipo_research`), rendered in the dashboard's *
 
 | Component | Host | Notes |
 |---|---|---|
-| Dashboard | Cloudflare Pages | built with `VITE_API_BASE=<api-url>/api`, then `wrangler pages deploy dist` |
-| Backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small` (free tier) | one instance via `docker-compose.aws.yml` |
+| Dashboard | Cloudflare Pages | `sunrise-dashboard.pages.dev`; built with `VITE_API_BASE=https://sunrise-api-proxy.devbulchandani876.workers.dev/api` |
+| API proxy | Cloudflare Worker | `sunrise-api-proxy`; origin is `http://52.7.157.152.sslip.io:8000` |
+| Backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small`, `us-east-1` | Instance `i-04187b97cb6a30803`; one instance via `docker-compose.aws.yml` |
 
-Deploy the backend from scratch:
+The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. The EC2 host has no SSH ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values. For Bedrock, set `LLM_PROVIDER=bedrock`, `LLM_MODEL` to an enabled model ID, and `LLM_BEDROCK_REGION` to the project's selected Region; the EC2 role needs `bedrock:InvokeModel` permission for that model. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
+
+Inside the SSM session, update the checkout and restart the stack with:
 
 ```bash
-aws configure                                  # credentials with EC2 permissions
-./deploy/aws-ec2.sh                            # keypair + SG + t4g.small + docker install (user-data)
-scp .env ubuntu@<EC2_IP>:~/sunrise/.env        # secrets, never committed
-scp docker-compose.aws.yml ubuntu@<EC2_IP>:~/sunrise/
-ssh -i deploy/sunrise-deploy-key.pem ubuntu@<EC2_IP> \
-  'cd ~/sunrise && sudo docker compose -f docker-compose.aws.yml up -d --build'
+cd /home/ubuntu/sunrise
+git pull
+docker compose -f docker-compose.aws.yml up -d --build
 ```
 
-Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Point the dashboard at the new API by rebuilding with `VITE_API_BASE=http://<EC2_IP>:8000/api`.
+Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Article records older than `ARTICLE_RETENTION_DAYS` (30 days by default) are purged daily. The Worker origin is configured in `deploy/cloudflare/worker.js`; after an origin change, deploy it with Wrangler. Rebuild Pages with the `VITE_API_BASE` value above when its API URL changes. The older `deploy/aws-ec2.sh` script predates this setup and should not be used for the live project.
+
+The backend startup also ensures the unique notification index exists. This makes concurrent dispatcher attempts idempotent and allows the notification scheduler to record and deliver Telegram alerts.
 
 Backfill/re-run analysis manually if needed:
 
