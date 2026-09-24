@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
+from app.core.auth import require_authenticated_user
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import get_db
@@ -47,6 +48,12 @@ from app.services.scraping.health import compute_metrics  # noqa: F401
 
 log = get_logger("api")
 router = APIRouter(prefix="/api")
+
+
+@router.get("/auth/me")
+async def current_user(claims: dict = Depends(require_authenticated_user)):
+    """Return the authenticated Cognito identity without exposing token contents."""
+    return {"sub": claims["sub"], "email": claims.get("email")}
 
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:

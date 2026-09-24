@@ -141,6 +141,8 @@ See `.env.example`. Key ones:
 | `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite. Bedrock Mantle uses `openai.gpt-oss-20b` and `https://bedrock-mantle.us-east-1.api.aws/v1` |
 | `LLM_API_KEY` | Provider key. For Bedrock Mantle, use the Bedrock bearer API key; it is sent as an `Authorization: Bearer` token |
 | `LLM_BEDROCK_REGION` | Bedrock selected Region; defaults to `us-east-1` |
+| `COGNITO_REGION` / `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` | Optional Cognito access-token verification settings for future authenticated account APIs |
+| `TRADING_ENABLED` | Trading authorization is fail-closed (`false` by default); no order routes are enabled yet |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
 | `SMTP_*` / `EMAIL_FROM` | Email digests (optional) |
@@ -197,6 +199,8 @@ The brief is stored on the event (`ipo_research`), rendered in the dashboard's *
 
 The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. The EC2 host has no SSH ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values. Production currently calls Bedrock Mantle through the OpenAI-compatible client using `LLM_MODEL=openai.gpt-oss-20b`, `LLM_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/v1`, and a Bedrock bearer key in `LLM_API_KEY`. The alternative Bedrock Runtime Converse provider uses `LLM_PROVIDER=bedrock`, an enabled Bedrock model ID, and the EC2 instance role. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
 
+The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend currently verifies Cognito access tokens for future private API routes; existing market-data routes remain public. Trading is still disabled and no broker is connected. See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
+
 Inside the SSM session, update the checkout and restart the stack with:
 
 ```bash
@@ -236,6 +240,7 @@ The scheduler picks up new sources within 60 seconds. For HTML sources provide a
 
 ```
 GET  /api/health                     GET  /api/events (?min_urgency=&level=&category=)
+GET  /api/auth/me                   (Cognito access token required)
 GET  /api/events/{id}                GET  /api/sources
 GET  /api/scrapers/health            GET  /api/scrapers/{id}/runs
 GET  /api/scrapers/{id}/healing-history

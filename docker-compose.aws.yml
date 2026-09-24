@@ -29,6 +29,10 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://sunrise:sunrise@postgres:5432/sunrise
       REDIS_URL: redis://redis:6379
+      COGNITO_REGION: us-east-1
+      COGNITO_USER_POOL_ID: us-east-1_V7pzjzvij
+      COGNITO_APP_CLIENT_ID: 6l372ppaohfv233ojmgkhqf2k6
+      TRADING_ENABLED: "false"
     volumes:
       - ./.brightdata:/root/.config/brightdata-cli:ro
     ports:

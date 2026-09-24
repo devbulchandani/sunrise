@@ -11,6 +11,7 @@ import type {
   SourcesResponse,
   SystemStats,
 } from "../types";
+import { getCurrentAccessToken } from "./authToken";
 
 /**
  * All requests go through the Vite dev proxy ("/api" → http://localhost:8000)
@@ -39,12 +40,14 @@ async function request<T>(
 ): Promise<T> {
   let res: Response;
   try {
+    const accessToken = await getCurrentAccessToken();
     res = await fetch(`${BASE}${path}`, {
       ...init,
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
         ...adminHeaders(),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...init.headers,
       },
     });

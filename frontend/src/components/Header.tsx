@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { LiveDot } from "./StatusDot";
 import type { StreamStatus } from "../hooks/useEventStream";
+import { useAuth } from "../services/auth";
 
 const NAV = [
   { to: "/", label: "Market Pulse" },
@@ -10,6 +11,7 @@ const NAV = [
 
 export function Header({ streamStatus }: { streamStatus: StreamStatus }) {
   const { pathname } = useLocation();
+  const { user, ready, configured, signIn, signOut } = useAuth();
   return (
     <header className="sticky top-0 z-20 border-b border-edge bg-base/95 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-8 px-5">
@@ -37,8 +39,28 @@ export function Header({ streamStatus }: { streamStatus: StreamStatus }) {
           ))}
         </nav>
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-4">
           <LiveDot connected={streamStatus === "connected"} />
+          {configured && ready && (
+            user ? (
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="font-mono text-xs text-ink-dim hover:text-amber"
+                title="Sign out"
+              >
+                {String(user.profile.email || "Account")} · Sign out
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void signIn()}
+                className="rounded border border-edge px-3 py-1.5 font-mono text-xs text-ink-dim hover:border-amber hover:text-amber"
+              >
+                Sign in / Create account
+              </button>
+            )
+          )}
         </div>
       </div>
     </header>
