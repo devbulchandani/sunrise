@@ -30,10 +30,17 @@ class LLMError(Exception):
 
 
 @lru_cache(maxsize=4)
-def _bedrock_runtime(region: str):
+def _bedrock_runtime(region: str, api_key: str = ""):
     """Use the runtime's default AWS credential chain (EC2 instance role in prod)."""
+    import os
+
     import boto3
     from botocore.config import Config
+
+    # Bedrock API keys use this standard SDK environment variable. The app's
+    # .env is parsed by Pydantic, not exported to the process environment.
+    if api_key:
+        os.environ["AWS_BEARER_TOKEN_BEDROCK"] = api_key
 
     return boto3.client(
         "bedrock-runtime",
@@ -139,7 +146,10 @@ class LLMClient:
         """Invoke Amazon Nova Micro through Bedrock Converse using the instance role."""
         from botocore.exceptions import ClientError
 
-        client = _bedrock_runtime(self.settings.llm_bedrock_region)
+        client = _bedrock_runtime(
+            self.settings.llm_bedrock_region,
+            self.settings.llm_api_key,
+        )
         try:
             response = client.converse(
                 modelId=self.settings.llm_model,

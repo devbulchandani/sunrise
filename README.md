@@ -138,7 +138,8 @@ See `.env.example`. Key ones:
 | `DATABASE_URL` | Postgres async DSN |
 | `REDIS_URL` | Redis for queues/pubsub/cache |
 | `LLM_PROVIDER` | `openai` (OpenAI-compatible endpoint), `bedrock`, or `anthropic` |
-| `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite; Amazon Bedrock uses `LLM_PROVIDER=bedrock`, a Bedrock model ID, and the EC2 instance role (no Bedrock API key) |
+| `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite; Amazon Bedrock uses `LLM_PROVIDER=bedrock`, a Bedrock model ID, and the EC2 instance role in production |
+| `LLM_API_KEY` | Provider key for OpenAI-compatible/Anthropic backends; when `LLM_PROVIDER=bedrock`, it can hold a Bedrock bearer API key for local use |
 | `LLM_BEDROCK_REGION` | Bedrock selected Region; defaults to `us-east-1` |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
