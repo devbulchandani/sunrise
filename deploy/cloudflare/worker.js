@@ -1,6 +1,6 @@
 // Sunrise API proxy — gives the HTTPS dashboard an HTTPS origin that
 // forwards to the EC2 backend over HTTP (server-to-server, no mixed content).
-const BACKEND = "http://52.23.202.227.sslip.io:8000";
+const BACKEND = "http://52.7.157.152.sslip.io:8000";
 
 export default {
   async fetch(request) {
