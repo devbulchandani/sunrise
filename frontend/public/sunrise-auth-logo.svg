@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100" fill="none">
+  <rect x="8" y="22" width="56" height="56" rx="14" fill="#11161F" stroke="#5A3A0A"/>
+  <path d="M20 61h32M24 56a12 12 0 0 1 24 0M36 33v5m-13 4 4 4m22-4-4 4" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+  <path d="m25 54 7-5 5 3 10-10" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="82" y="55" fill="#F59E0B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26" font-weight="700" letter-spacing="6">SUNRISE</text>
+  <text x="84" y="74" fill="#8B95A5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" letter-spacing="2">WAKE UP BEFORE THE MARKET DOES</text>
+</svg>
