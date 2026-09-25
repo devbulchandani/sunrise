@@ -1,0 +1,98 @@
+{
+  "categories": {
+    "global": {
+      "colorSchemeMode": "DARK",
+      "spacingDensity": "REGULAR",
+      "pageHeader": { "enabled": false },
+      "pageFooter": { "enabled": false }
+    }
+  },
+  "components": {
+    "pageBackground": {
+      "image": { "enabled": false },
+      "darkMode": { "color": "0a0e14ff" }
+    },
+    "form": {
+      "borderRadius": 8,
+      "darkMode": {
+        "backgroundColor": "11161fff",
+        "borderColor": "1c2530ff"
+      },
+      "logo": {
+        "enabled": true,
+        "location": "CENTER",
+        "position": "TOP",
+        "formInclusion": "IN"
+      }
+    },
+    "pageText": {
+      "darkMode": {
+        "bodyColor": "8b95a5ff",
+        "headingColor": "d5dbe4ff",
+        "descriptionColor": "8b95a5ff"
+      }
+    },
+    "primaryButton": {
+      "darkMode": {
+        "defaults": {
+          "backgroundColor": "f59e0bff",
+          "textColor": "0a0e14ff"
+        },
+        "hover": {
+          "backgroundColor": "fbbf24ff",
+          "textColor": "0a0e14ff"
+        },
+        "active": {
+          "backgroundColor": "d97706ff",
+          "textColor": "0a0e14ff"
+        }
+      }
+    },
+    "secondaryButton": {
+      "darkMode": {
+        "defaults": {
+          "backgroundColor": "11161fff",
+          "borderColor": "2a3646ff",
+          "textColor": "d5dbe4ff"
+        },
+        "hover": {
+          "backgroundColor": "161d29ff",
+          "borderColor": "f59e0bff",
+          "textColor": "f59e0bff"
+        },
+        "active": {
+          "backgroundColor": "1c2530ff",
+          "borderColor": "f59e0bff",
+          "textColor": "fbbf24ff"
+        }
+      }
+    }
+  },
+  "componentClasses": {
+    "input": {
+      "darkMode": {
+        "defaults": {
+          "backgroundColor": "0a0e14ff",
+          "borderColor": "2a3646ff"
+        },
+        "placeholderColor": "5a6472ff"
+      },
+      "borderRadius": 6
+    },
+    "inputLabel": {
+      "darkMode": { "textColor": "d5dbe4ff" }
+    },
+    "focusState": {
+      "darkMode": { "borderColor": "f59e0bff" }
+    },
+    "link": {
+      "darkMode": {
+        "defaults": { "textColor": "f59e0bff" },
+        "hover": { "textColor": "fbbf24ff" }
+      }
+    },
+    "divider": {
+      "darkMode": { "borderColor": "1c2530ff" }
+    }
+  }
+}
