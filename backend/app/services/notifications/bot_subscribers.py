@@ -50,9 +50,11 @@ HELP_TEXT = (
     "/portfolio — your simulated paper holdings\n"
     "/link CODE — connect this chat to your Sunrise account\n"
     "/unlink — disconnect Telegram from your account\n"
+    "/cancel — cancel a pending Buy/Sell prompt\n"
     "/stop — unsubscribe from alerts\n\n"
-    "Paper trading: link your account, then tap Buy or Sell under an alert "
-    "and confirm. Every order is simulated.\n\n"
+    "Paper trading: link your account, then tap Buy or Sell under an alert, "
+    "reply with a share quantity (10) or a rupee amount (₹25000), and confirm. "
+    "Every order is simulated.\n\n"
     "Not financial advice. AI output is interpretation, never prediction."
 )
 
@@ -176,15 +178,34 @@ async def handle_update(session: AsyncSession, update: dict) -> None:
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id", "")).strip()
     text = (message.get("text") or "").strip()
-    if not chat_id or not text.startswith("/"):
+    if not chat_id or not text:
+        return
+
+    chat_type = chat.get("type", "private")
+
+    # A plain message is the size for a pending Buy/Sell prompt. Anything that
+    # is not part of a trade flow is ignored, so ordinary chatter stays quiet.
+    if not text.startswith("/"):
+        if chat_type == "private":
+            result = await telegram_trade.handle_text(session, chat_id, text)
+            if result is not None:
+                reply, reply_markup = result
+                await _send(chat_id, reply, reply_markup)
         return
 
     command, _, arg = text.partition(" ")
     command = command.split("@")[0].lower()
 
+    if command == "/cancel":
+        cleared = await telegram_trade.clear_intent(session, chat_id)
+        await _send(
+            chat_id,
+            "✖️ Trade request cancelled." if cleared else "Nothing to cancel.",
+        )
+        return
+
     # Linking is handled before creating a subscriber row: the chat is moving
     # to an existing Cognito-backed user, not signing up as a new subscriber.
-    chat_type = (message.get("chat") or {}).get("type", "private")
     if command == "/link":
         if chat_type != "private":
             await _send(
@@ -198,9 +219,10 @@ async def handle_update(session: AsyncSession, update: dict) -> None:
         else:
             reply = (
                 "✅ Linked to your Sunrise account.\n\n"
-                "You'll now get paper-trade buttons on impact alerts. Tap a stock, "
-                "review the order, then confirm. Every trade is simulated — no broker "
-                "is contacted and live trading stays disabled.\n\n"
+                "You'll now get Buy and Sell buttons under impact alerts. Tap one, "
+                "reply with a share quantity (10) or a rupee amount (₹25000), then "
+                "tap Confirm. Every trade is simulated — no broker is contacted and "
+                "live trading stays disabled.\n\n"
                 "Try /portfolio to see your holdings."
             )
         await _send(chat_id, reply)
@@ -218,8 +240,8 @@ async def handle_update(session: AsyncSession, update: dict) -> None:
 
     user, pref, created = await _get_or_create_user(session, chat_id)
     linked_hint = (
-        "\n\n📊 Paper trading is linked to your account. Tap a Buy/Sell button on "
-        "an alert to review a simulated order."
+        "\n\n📊 Paper trading is linked. Tap Buy or Sell under an alert, reply "
+        "with a share quantity or ₹ amount, then confirm."
         if user.cognito_sub and pref.telegram_enabled and telegram_trade.paper_ready()
         else f"\n\nPaper trading: send /link CODE to connect this chat "
         f"(generate the code at {get_settings().public_dashboard_url.rstrip('/')}/trading)."
@@ -291,6 +313,7 @@ async def register_command_menu() -> None:
                     {"command": "portfolio", "description": "Your simulated paper holdings"},
                     {"command": "link", "description": "Link this chat: /link CODE"},
                     {"command": "unlink", "description": "Disconnect Telegram trading"},
+                    {"command": "cancel", "description": "Cancel a pending Buy/Sell prompt"},
                     {"command": "urgency", "description": "Minimum urgency 0-100 (e.g. /urgency 80)"},
                     {"command": "assets", "description": "Filter by symbols (e.g. /assets BTC,SPY)"},
                     {"command": "categories", "description": "Filter: crypto, macro, stocks, geopolitics, commodities"},

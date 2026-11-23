@@ -15,7 +15,7 @@ the server validates it again.
 
 import secrets
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from app.models.models import (
     PaperAccount,
     PaperPosition,
     TelegramLinkCode,
+    TelegramTradeIntent,
     TradeProposal,
     User,
     UserPreference,
@@ -247,11 +248,20 @@ async def unlink_chat(session: AsyncSession, chat_id: str) -> User | None:
     return user
 
 
-# ---------------------------------------------------------------- trading
+# ---------------------------------------------------------------- sized tickets
+
+
+def _force_reply(placeholder: str) -> dict:
+    """Telegram reply prompt: the user's next message becomes the order size."""
+    return {
+        "force_reply": True,
+        "input_field_placeholder": placeholder[:64],
+        "selective": False,
+    }
 
 
 def quick_ticket_quantity(quote: Quote) -> int:
-    """Default size from a small notional budget, capped by the order limit."""
+    """Suggested size from the default ticket budget, capped by order limits."""
     settings = get_settings()
     if quote.price <= 0:
         return 1
@@ -259,15 +269,6 @@ def quick_ticket_quantity(quote: Quote) -> int:
     cap = Decimal(str(settings.paper_max_order_notional))
     quantity = int(min(budget, cap) / quote.price)
     return max(1, min(quantity, 1_000_000))
-
-
-async def held_symbols(session: AsyncSession, user: User) -> set[str]:
-    rows = await session.execute(
-        select(PaperPosition.symbol)
-        .join(PaperAccount, PaperPosition.account_id == PaperAccount.id)
-        .where(PaperAccount.user_id == user.id, PaperPosition.quantity > 0)
-    )
-    return {symbol for (symbol,) in rows.all()}
 
 
 async def position_quantity(session: AsyncSession, user: User, symbol: str) -> int:
@@ -285,19 +286,174 @@ async def position_quantity(session: AsyncSession, user: User, symbol: str) -> i
     return int(value or 0)
 
 
-async def trade_keyboard(
+async def start_intent(
     session: AsyncSession,
+    user: User,
+    chat_id: str,
+    *,
+    symbol: str,
+    side: str,
+    event_id: int | None,
+) -> TelegramTradeIntent:
+    """Create (or replace) the chat's pending Buy/Sell size prompt."""
+    existing = list(
+        (
+            await session.execute(
+                select(TelegramTradeIntent).where(
+                    TelegramTradeIntent.chat_id == str(chat_id)
+                )
+            )
+        ).scalars()
+    )
+    for row in existing:
+        await session.delete(row)
+    settings = get_settings()
+    intent = TelegramTradeIntent(
+        chat_id=str(chat_id),
+        user_id=user.id,
+        symbol=symbol,
+        side=side,
+        event_id=event_id,
+        expires_at=_now()
+        + timedelta(seconds=settings.paper_telegram_intent_ttl_seconds),
+    )
+    session.add(intent)
+    await session.commit()
+    return intent
+
+
+async def get_intent(
+    session: AsyncSession, chat_id: str
+) -> TelegramTradeIntent | None:
+    return (
+        await session.execute(
+            select(TelegramTradeIntent).where(
+                TelegramTradeIntent.chat_id == str(chat_id)
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def clear_intent(session: AsyncSession, chat_id: str) -> bool:
+    intent = await get_intent(session, chat_id)
+    if intent is None:
+        return False
+    await session.delete(intent)
+    await session.commit()
+    return True
+
+
+def quantity_prompt(
+    intent: TelegramTradeIntent,
+    quote: Quote,
+    *,
+    held: int,
+    cash: Decimal,
+) -> tuple[str, dict]:
+    settings = get_settings()
+    default_qty = quick_ticket_quantity(quote)
+    if intent.side == "BUY":
+        capacity = (
+            f"Buying power ₹{float(cash):,.2f} · a "
+            f"₹{settings.paper_telegram_ticket_notional:,.0f} ticket is about "
+            f"{default_qty} shares."
+        )
+    else:
+        capacity = f"You hold {held:,} shares."
+    text = (
+        f"💬 {intent.side} {intent.symbol} — enter the size\n\n"
+        f"Simulated quote ₹{float(quote.price):,.2f}\n"
+        f"{capacity}\n\n"
+        "Reply with a share quantity (e.g. 10) or a rupee amount (e.g. ₹25000).\n"
+        "Your next message sets the order size. Send /cancel to abort."
+    )
+    return text, _force_reply(f"{intent.symbol} shares or ₹ amount")
+
+
+def parse_size(
+    text: str,
+    *,
+    price: Decimal,
+    side: str,
+    held: int,
+    cash: Decimal,
+    fee: Decimal,
+    max_order_notional: Decimal,
+) -> tuple[int | None, str | None]:
+    """Parse a typed size: ``10`` = shares, ``₹25000``/``25000 rs`` = notional."""
+    raw = (text or "").strip().lower().replace(",", "").replace("_", " ")
+    if not raw:
+        return None, "Send a share quantity (e.g. 10) or a rupee amount (e.g. ₹25000)."
+
+    is_amount = (
+        "₹" in raw
+        or raw.startswith("rs")
+        or raw.startswith("inr")
+        or raw.endswith("rs")
+        or "rupee" in raw
+    )
+    for token in ("₹", "rupees", "rupee", "inr", "rs", "shares", "share", "qty", "quantity", "x"):
+        raw = raw.replace(token, " ")
+    raw = " ".join(raw.split())
+    if not raw:
+        return None, "Send a number, e.g. 10 or ₹25000."
+
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return None, "I couldn't read that size. Send 10 for shares or ₹25000 for an amount."
+
+    if value <= 0:
+        return None, "The size must be greater than zero."
+
+    if is_amount:
+        if price <= 0:
+            return None, "No simulated quote is available right now."
+        quantity = int(value / price)
+        if quantity < 1:
+            return None, f"₹{value:,.0f} is below one share at ₹{float(price):,.2f}."
+    else:
+        if value != value.to_integral_value():
+            return None, "Share quantity must be a whole number."
+        quantity = int(value)
+
+    if quantity > 1_000_000:
+        return None, "That is larger than the paper desk allows (1,000,000 shares)."
+
+    if side == "SELL":
+        if quantity > held:
+            if held <= 0:
+                return None, "You do not hold this stock in the paper account."
+            return None, f"You hold {held:,} shares. Enter {held:,} or fewer."
+    else:
+        if price > 0:
+            affordable = int((cash - fee) / price)
+            if quantity > affordable:
+                return None, (
+                    f"You can afford at most {max(affordable, 0):,} shares at the "
+                    f"current quote (including the ₹{float(fee):,.2f} fee)."
+                )
+            notional = price * Decimal(quantity)
+            if notional > max_order_notional:
+                cap = int(max_order_notional / price)
+                return None, (
+                    f"The per-order cap is ₹{float(max_order_notional):,.2f} — "
+                    f"about {max(cap, 1):,} shares at this quote."
+                )
+    return quantity, None
+
+
+def trade_keyboard(
     user: User,
     event_id: int | None,
     assets: list[dict],
 ) -> dict | None:
-    """Inline keyboard of paper-trade actions for an impact alert."""
+    """Buy and Sell buttons for the impacted paper universe, under every alert."""
     if not paper_ready() or not user.cognito_sub or not user.telegram_chat_id:
         return None
     if not assets:
         return None
     settings = get_settings()
-    held = await held_symbols(session, user)
     keyboard: list[list[dict]] = []
     seen: set[str] = set()
 
@@ -306,20 +462,18 @@ async def trade_keyboard(
         if not symbol or symbol in seen or get_instrument(symbol) is None:
             continue
         seen.add(symbol)
-        row = [
-            {
-                "text": f"{_impact_icon(asset.get('impact'))} Buy {symbol}",
-                "callback_data": f"pt:{event_id or 0}:{symbol}:B",
-            }
-        ]
-        if symbol in held:
-            row.append(
+        keyboard.append(
+            [
+                {
+                    "text": f"{_impact_icon(asset.get('impact'))} Buy {symbol}",
+                    "callback_data": f"pt:{event_id or 0}:{symbol}:B",
+                },
                 {
                     "text": f"🔻 Sell {symbol}",
                     "callback_data": f"pt:{event_id or 0}:{symbol}:S",
-                }
-            )
-        keyboard.append(row)
+                },
+            ]
+        )
         if len(keyboard) >= max(1, settings.paper_telegram_max_symbols):
             break
 
@@ -365,6 +519,25 @@ def proposal_prompt(proposal: TradeProposal, quote_price: float, fee: float) -> 
     return "\n".join(lines)
 
 
+def confirm_markup(proposal: TradeProposal) -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": f"✅ Confirm {proposal.side} {proposal.quantity} {proposal.symbol}",
+                    "callback_data": f"pc:{proposal.id}",
+                }
+            ],
+            [
+                {
+                    "text": "✖️ Cancel",
+                    "callback_data": f"px:{proposal.id}",
+                }
+            ],
+        ]
+    }
+
+
 def _order_result_text(order, cash: float) -> str:
     status = order.status
     if status == "FILLED":
@@ -395,39 +568,84 @@ def _order_result_text(order, cash: float) -> str:
     return "\n".join(lines)
 
 
-async def create_quick_proposal(
-    session: AsyncSession,
-    user: User,
-    *,
-    symbol: str,
-    side: str,
-    event_id: int | None,
-) -> TradeProposal:
-    quote = get_quote(symbol)
-    if quote is None:
-        raise broker.TradingError(
-            f"{symbol or 'That symbol'} is not in the paper universe.", 400
+async def handle_text(
+    session: AsyncSession, chat_id: str, text: str
+) -> tuple[str, dict | None] | None:
+    """Consume a typed size for the chat's pending Buy/Sell intent.
+
+    Returns ``None`` when the message is not part of a trade flow so the bot can
+    keep ignoring ordinary chatter.
+    """
+    user = await get_user_by_chat(session, chat_id)
+    if user is None or not user.cognito_sub:
+        return None
+    intent = await get_intent(session, chat_id)
+    if intent is None:
+        return None
+    if _aware(intent.expires_at) <= _now():
+        await clear_intent(session, chat_id)
+        return "⌛ That trade request expired. Tap Buy or Sell on an alert again.", None
+
+    settings = get_settings()
+    if not settings.paper_trading_enabled or settings.paper_trading_frozen:
+        await clear_intent(session, chat_id)
+        return "🔒 The paper desk is currently closed. No order was placed.", None
+    if not settings.paper_telegram_enabled:
+        await clear_intent(session, chat_id)
+        return (
+            "🔒 Telegram trading is turned off. Use the paper desk in the browser.",
+            None,
         )
-    quantity = quick_ticket_quantity(quote)
-    if side == "SELL":
-        held = await position_quantity(session, user, symbol)
-        if held <= 0:
-            raise broker.TradingError(
-                f"You do not hold {symbol} in the paper account.", 400
-            )
-        quantity = min(quantity, held)
-    rationale = f"Telegram quick trade{' · event #' + str(event_id) if event_id else ''}"
-    return await broker.create_proposal(
-        session,
-        user,
-        claims_for(user),
-        symbol=symbol,
-        side=side,
-        order_type="MARKET",
-        quantity=quantity,
-        limit_price=None,
-        event_id=event_id,
-        rationale=rationale,
+
+    quote = get_quote(intent.symbol)
+    if quote is None:
+        await clear_intent(session, chat_id)
+        return "⚠️ That symbol is no longer in the paper universe.", None
+
+    account = await get_or_create_account(session, user)
+    summary = await account_summary(session, account)
+    cash = Decimal(str(summary["cash"]))
+    held = await position_quantity(session, user, intent.symbol)
+
+    quantity, error = parse_size(
+        text,
+        price=quote.price,
+        side=intent.side,
+        held=held,
+        cash=cash,
+        fee=Decimal(str(settings.paper_fee_per_order)),
+        max_order_notional=Decimal(str(settings.paper_max_order_notional)),
+    )
+    if error:
+        prompt, markup = quantity_prompt(intent, quote, held=held, cash=cash)
+        return f"⚠️ {error}\n\n{prompt}", markup
+
+    assert quantity is not None
+    rationale = (
+        f"Telegram sized ticket · {quantity} {intent.symbol}"
+        f"{' · event #' + str(intent.event_id) if intent.event_id else ''}"
+    )
+    try:
+        proposal = await broker.create_proposal(
+            session,
+            user,
+            claims_for(user),
+            symbol=intent.symbol,
+            side=intent.side,
+            order_type="MARKET",
+            quantity=quantity,
+            limit_price=None,
+            event_id=intent.event_id,
+            rationale=rationale,
+        )
+    except broker.TradingError as exc:
+        prompt, markup = quantity_prompt(intent, quote, held=held, cash=cash)
+        return f"⚠️ {exc.message}\n\n{prompt}", markup
+
+    await clear_intent(session, chat_id)
+    return (
+        proposal_prompt(proposal, quote_price=float(quote.price), fee=settings.paper_fee_per_order),
+        confirm_markup(proposal),
     )
 
 
@@ -462,36 +680,28 @@ async def handle_callback(
         if raw_side.upper() not in {"B", "S"}:
             return "Unknown trade action.", None
         side = "BUY" if raw_side.upper() == "B" else "SELL"
-        event_id = int(raw_event) or None
-        try:
-            proposal = await create_quick_proposal(
-                session, user, symbol=symbol, side=side, event_id=event_id
-            )
-        except broker.TradingError as exc:
-            return f"⚠️ {exc.message}", None
         quote = get_quote(symbol)
-        return (
-            proposal_prompt(
-                proposal,
-                quote_price=float(quote.price) if quote else 0.0,
-                fee=settings.paper_fee_per_order,
-            ),
-            {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": f"✅ Confirm {proposal.side} {proposal.quantity} {proposal.symbol}",
-                            "callback_data": f"pc:{proposal.id}",
-                        }
-                    ],
-                    [
-                        {
-                            "text": "✖️ Cancel",
-                            "callback_data": f"px:{proposal.id}",
-                        }
-                    ],
-                ]
-            },
+        if quote is None:
+            return f"⚠️ {symbol or 'That symbol'} is not in the paper universe.", None
+        held = await position_quantity(session, user, symbol)
+        if side == "SELL" and held <= 0:
+            return (
+                f"⚠️ You do not hold {symbol} in the paper account. "
+                "Sell works only for stocks in your book.",
+                None,
+            )
+        account = await get_or_create_account(session, user)
+        summary = await account_summary(session, account)
+        intent = await start_intent(
+            session,
+            user,
+            chat_id,
+            symbol=symbol,
+            side=side,
+            event_id=int(raw_event) or None,
+        )
+        return quantity_prompt(
+            intent, quote, held=held, cash=Decimal(str(summary["cash"]))
         )
 
     if parts[0] in {"pc", "px"} and len(parts) == 2 and parts[1].isdigit():

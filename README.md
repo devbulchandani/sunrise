@@ -147,8 +147,8 @@ See `.env.example`. Key ones:
 | `PAPER_TRADING_FROZEN` | Emergency freeze for all paper proposals/orders |
 | `PAPER_STARTING_CASH` / `PAPER_MAX_*` | Opening balance and deterministic per-order risk limits |
 | `PAPER_TELEGRAM_ENABLED` | Enable/disable paper-trade buttons in Telegram (default on; still gated by the paper kill switches) |
-| `PAPER_TELEGRAM_TICKET_NOTIONAL` / `PAPER_TELEGRAM_MAX_SYMBOLS` | Default Telegram ticket size (₹25,000 budget) and how many symbols get buttons |
-| `PAPER_TELEGRAM_LINK_TTL_SECONDS` | Lifetime of a one-time `/link` code (default 600) |
+| `PAPER_TELEGRAM_TICKET_NOTIONAL` / `PAPER_TELEGRAM_MAX_SYMBOLS` | Suggested Telegram ticket size (₹25,000 budget) and how many symbols get buttons |
+| `PAPER_TELEGRAM_LINK_TTL_SECONDS` / `PAPER_TELEGRAM_INTENT_TTL_SECONDS` | Lifetime of a one-time `/link` code (600s) and of a Buy/Sell size prompt (300s) |
 | `TELEGRAM_BOT_USERNAME` / `PUBLIC_DASHBOARD_URL` | Bot handle and dashboard links used in Telegram messages |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
@@ -223,16 +223,17 @@ its quantity, average cost, last simulated price, market value, weight in the
 book, and P&L percentage. The same totals are available from
 `GET /api/trading/portfolio`.
 
-**Telegram trading.** A linked Telegram chat gets Buy/Sell buttons under impact
-alerts for symbols in the paper universe. Tapping a button creates a proposal
-with a default ₹25,000 ticket (sized to holdings for sells); a second tap
-confirms it. Linking is a one-time handshake:
+**Telegram trading.** A linked Telegram chat gets Buy and Sell buttons under
+impact alerts for symbols in the paper universe. Tap Buy or Sell, reply with a
+share quantity (e.g. `10`) or a rupee amount (e.g. `₹25000`), review the sized
+proposal, then confirm. Sizes are the only thing typed; the symbol and side come
+from the server-issued buttons. Linking is a one-time handshake:
 
 1. On `/trading`, open **Trade from Telegram** and generate a link code.
 2. Send `/link CODE` to [@sunrisescraperbot](https://t.me/sunrisescraperbot) from
    a **private chat**. Codes are single-use and expire in 10 minutes.
 3. The bot then shows `/portfolio`, trade buttons, and confirmations for that chat.
-   `/unlink` disconnects it.
+   `/unlink` disconnects it, and `/cancel` aborts a pending size prompt.
 
 Group chats are refused, free text is never parsed into an order, and every
 Telegram order still runs the same server-side risk policy and expiry as the
@@ -265,9 +266,9 @@ proposal expiry.
 
 **Not implemented:** live broker connectivity, Upstox sandbox credentials,
 partial fills, and options/futures. The Telegram ticket is deliberately simple:
-market orders only, one default size, no limit price or quantity picker (use the
-dashboard for those). Live execution remains a separate release gate (see the
-trading plan).
+market orders only, with the size typed in chat and no limit price (use the
+dashboard for limit orders). Live execution remains a separate release gate (see
+the trading plan).
 
 ## Deployment
 
@@ -376,6 +377,7 @@ Subscriber commands:
 | `/portfolio` | Your simulated paper holdings and P&L |
 | `/link CODE` | Link this private chat to your signed-in Sunrise account |
 | `/unlink` | Disconnect Telegram trading (alerts continue) |
+| `/cancel` | Abort a pending Buy/Sell size prompt |
 | `/help` | How alerts and paper trading work |
 | `/stop` | Unsubscribe |
 
@@ -395,7 +397,7 @@ python -m app.services.notifications.bot_subscribers
 ## Running tests
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest tests -q    # 84 tests
+cd backend && ./.venv/bin/python -m pytest tests -q    # 89 tests
 ```
 
 Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomaly detection, dedup fingerprints, candidate safety checks, accept/reject validation paths, urgency blending bounds, Telegram formatting (incl. no-prediction language), clustering similarity, and API round-trips on an isolated SQLite DB.

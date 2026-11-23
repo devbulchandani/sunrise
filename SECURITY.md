@@ -35,9 +35,11 @@ purges cached views — request a sensitive-data purge via
   chat**. Codes expire after 10 minutes.
 - One chat maps to one account. Group chats are refused for linking and for
   every trade callback.
-- Trade buttons carry a symbol from the fixed paper universe; free text is never
-  parsed into an order payload. The server re-validates the symbol, the owner,
-  the kill switches, and the full risk policy at confirmation time.
+- Trade buttons carry a symbol and side from the fixed paper universe. The only
+  free text accepted is a trade size, parsed strictly as a share count or a ₹
+  amount and stored as a short-lived intent; it cannot name a symbol or side.
+  The server re-validates the symbol, the owner, the kill switches, and the full
+  risk policy at confirmation time.
 - Proposals are short-lived and single-use. A replayed Confirm returns the
   existing order instead of creating a second one.
 - `/unlink` detaches the chat; alerts continue but trade buttons stop.

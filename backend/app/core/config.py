@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     paper_telegram_ticket_notional: float = 25_000.0
     paper_telegram_max_symbols: int = 4
     paper_telegram_link_ttl_seconds: int = 600
+    paper_telegram_intent_ttl_seconds: int = 300
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

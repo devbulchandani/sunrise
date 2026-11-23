@@ -411,6 +411,31 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class TelegramTradeIntent(Base):
+    """A chat waiting for the user to type a trade size.
+
+    Created by a Buy/Sell button, consumed by the next numeric reply. Kept in
+    the database so a bot restart cannot leave a chat half-way through an order
+    or replay an old prompt.
+    """
+
+    __tablename__ = "telegram_trade_intents"
+    __table_args__ = (
+        UniqueConstraint("chat_id", name="uq_telegram_trade_intent_chat"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(64))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    symbol: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(8))
+    event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("market_events.id", ondelete="SET NULL")
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TelegramLinkCode(Base):
     """Short-lived, single-use code that binds a Telegram chat to a Cognito user.
 

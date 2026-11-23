@@ -338,16 +338,21 @@ async def test_telegram_quick_trade_requires_link(trading):
     assert "not linked" in text.lower()
 
 
-async def test_telegram_quick_trade_confirm_flow(trading):
+async def test_telegram_typed_buy_confirm_flow(trading):
     async with trading["factory"]() as session:
         code, _ = await telegram_trade.issue_link_code(session, trading["user"])
         linked, error = await telegram_trade.consume_link_code(session, code, "5550009")
         assert error == "" and linked is not None
 
-        text, markup = await telegram_trade.handle_callback(
+        prompt, prompt_markup = await telegram_trade.handle_callback(
             session, "5550009", "pt:0:INFY:B"
         )
-        assert "REVIEW PAPER ORDER" in text
+        assert "enter the size" in prompt
+        assert prompt_markup is not None and prompt_markup.get("force_reply") is True
+
+        review, markup = await telegram_trade.handle_text(session, "5550009", "6")
+        assert "REVIEW PAPER ORDER" in review
+        assert "BUY 6 INFY" in review
         assert markup is not None
         confirm_data = markup["inline_keyboard"][0][0]["callback_data"]
         assert confirm_data.startswith("pc:")
@@ -364,11 +369,66 @@ async def test_telegram_quick_trade_confirm_flow(trading):
 
         account = await get_or_create_account(session, trading["user"])
         snapshot = await portfolio_snapshot(session, account)
-        assert any(row["symbol"] == "INFY" for row in snapshot["positions"])
+        infy = [row for row in snapshot["positions"] if row["symbol"] == "INFY"]
+        assert infy and infy[0]["quantity"] == 6
         assert proposal_id > 0
 
 
-async def test_telegram_sell_button_only_for_held_symbols(trading):
+async def test_telegram_typed_amount_uses_rupees(trading):
+    from decimal import Decimal
+
+    quote = get_quote("INFY")
+    assert quote is not None
+    expected = int(Decimal("30000") / quote.price)
+
+    async with trading["factory"]() as session:
+        code, _ = await telegram_trade.issue_link_code(session, trading["user"])
+        await telegram_trade.consume_link_code(session, code, "5550021")
+        await telegram_trade.handle_callback(session, "5550021", "pt:0:INFY:B")
+        review, markup = await telegram_trade.handle_text(session, "5550021", "₹30,000")
+
+    assert f"BUY {expected} INFY" in review
+    assert markup is not None
+
+
+def test_parse_size_understands_shares_and_rupees():
+    from decimal import Decimal
+
+    kwargs = dict(
+        price=Decimal("2500"),
+        side="BUY",
+        held=0,
+        cash=Decimal("100000"),
+        fee=Decimal("20"),
+        max_order_notional=Decimal("100000"),
+    )
+    assert telegram_trade.parse_size("10", **kwargs) == (10, None)
+    assert telegram_trade.parse_size("10 shares", **kwargs) == (10, None)
+    assert telegram_trade.parse_size("₹25,000", **kwargs) == (10, None)
+    assert telegram_trade.parse_size("25,000 rs", **kwargs) == (10, None)
+
+    quantity, error = telegram_trade.parse_size("10.5", **kwargs)
+    assert quantity is None and "whole number" in error
+    quantity, error = telegram_trade.parse_size("0", **kwargs)
+    assert quantity is None and "greater than zero" in error
+    quantity, error = telegram_trade.parse_size("999", **{**kwargs, "side": "SELL", "held": 5})
+    assert quantity is None and "hold 5" in error
+    quantity, error = telegram_trade.parse_size("2", **{**kwargs, "cash": Decimal("1000")})
+    assert quantity is None and "afford at most 0" in error
+
+
+async def test_telegram_sell_without_holding_is_refused(trading):
+    async with trading["factory"]() as session:
+        code, _ = await telegram_trade.issue_link_code(session, trading["user"])
+        await telegram_trade.consume_link_code(session, code, "5550022")
+        text, markup = await telegram_trade.handle_callback(
+            session, "5550022", "pt:0:INFY:S"
+        )
+    assert "do not hold" in text
+    assert markup is None
+
+
+async def test_trade_keyboard_always_offers_buy_and_sell(trading):
     from sqlalchemy import select
 
     async with trading["factory"]() as session:
@@ -378,8 +438,7 @@ async def test_telegram_sell_button_only_for_held_symbols(trading):
             await session.execute(select(User).where(User.id == trading["user"].id))
         ).scalar_one()
 
-        keyboard = await telegram_trade.trade_keyboard(
-            session,
+        keyboard = telegram_trade.trade_keyboard(
             user,
             7,
             [
@@ -389,8 +448,9 @@ async def test_telegram_sell_button_only_for_held_symbols(trading):
         )
         assert keyboard is not None
         rows = keyboard["inline_keyboard"]
+        assert len(rows[0]) == 2
         assert rows[0][0]["callback_data"] == "pt:7:INFY:B"
-        assert len(rows[0]) == 1  # no position, so no sell button
+        assert rows[0][1]["callback_data"] == "pt:7:INFY:S"
         assert rows[-1][0]["url"].endswith("/trading?event=7")
 
 
@@ -412,47 +472,33 @@ async def test_telegram_confirm_does_not_cross_accounts(trading):
     assert "not found" in text.lower()
 
 
-async def test_telegram_sell_is_sized_to_holding(trading):
-    from sqlalchemy import select
-    from app.models.models import TradeProposal
-
+async def test_telegram_sell_uses_typed_size_and_cannot_exceed_holding(trading):
     async with trading["factory"]() as session:
         code, _ = await telegram_trade.issue_link_code(session, trading["user"])
         await telegram_trade.consume_link_code(session, code, "5550012")
 
-        _text, markup = await telegram_trade.handle_callback(
-            session, "5550012", "pt:0:INFY:B"
-        )
+        await telegram_trade.handle_callback(session, "5550012", "pt:0:INFY:B")
+        review, markup = await telegram_trade.handle_text(session, "5550012", "5")
         assert markup is not None
         await telegram_trade.handle_callback(
             session, "5550012", markup["inline_keyboard"][0][0]["callback_data"]
         )
         orders = await broker.list_orders(session, trading["user"])
         held = orders[0].filled_quantity
-        assert held > 0
+        assert held == 5
 
-        user = (
-            await session.execute(select(User).where(User.id == trading["user"].id))
-        ).scalar_one()
-        keyboard = await telegram_trade.trade_keyboard(
-            session, user, 0, [{"symbol": "INFY", "impact": "positive", "confidence": 70}]
-        )
-        assert keyboard is not None
-        assert len(keyboard["inline_keyboard"][0]) == 2
-        assert keyboard["inline_keyboard"][0][1]["callback_data"] == "pt:0:INFY:S"
-
-        _sell_text, sell_markup = await telegram_trade.handle_callback(
+        prompt, sell_markup = await telegram_trade.handle_callback(
             session, "5550012", "pt:0:INFY:S"
         )
-        assert sell_markup is not None
-        proposal_id = int(sell_markup["inline_keyboard"][0][0]["callback_data"].split(":")[1])
-        proposal = (
-            await session.execute(
-                select(TradeProposal).where(TradeProposal.id == proposal_id)
-            )
-        ).scalar_one()
-        assert proposal.side == "SELL"
-        assert proposal.quantity == held
+        assert "You hold 5 shares" in prompt
+        assert sell_markup is not None and sell_markup.get("force_reply") is True
+
+        too_big, _ = await telegram_trade.handle_text(session, "5550012", "999")
+        assert "hold 5" in too_big
+
+        review, markup = await telegram_trade.handle_text(session, "5550012", "5")
+        assert "SELL 5 INFY" in review
+        assert markup is not None
 
 
 async def test_bot_link_and_portfolio_commands(trading, monkeypatch):
@@ -602,3 +648,60 @@ async def test_telegram_trading_respects_freeze(trading, monkeypatch):
         )
     assert markup is None
     assert "closed" in text.lower()
+
+
+async def test_telegram_intent_expires(trading, monkeypatch):
+    monkeypatch.setattr(get_settings(), "paper_telegram_intent_ttl_seconds", -1)
+    async with trading["factory"]() as session:
+        code, _ = await telegram_trade.issue_link_code(session, trading["user"])
+        await telegram_trade.consume_link_code(session, code, "5550023")
+        prompt, markup = await telegram_trade.handle_callback(
+            session, "5550023", "pt:0:INFY:B"
+        )
+        assert markup is not None
+        text, markup = await telegram_trade.handle_text(session, "5550023", "5")
+        assert "expired" in text.lower()
+        assert markup is None
+
+
+async def test_bot_consumes_typed_reply_and_cancel(trading, monkeypatch):
+    from app.services.notifications import bot_subscribers as bot
+
+    sent: list[tuple[str, dict | None]] = []
+
+    async def fake_send(chat_id, text, reply_markup=None):
+        sent.append((text, reply_markup))
+
+    monkeypatch.setattr(bot, "_send", fake_send)
+
+    async with trading["factory"]() as session:
+        code, _ = await telegram_trade.issue_link_code(session, trading["user"])
+        await telegram_trade.consume_link_code(session, code, "5550024")
+
+        await bot.handle_update(
+            session,
+            {
+                "update_id": 10,
+                "message": {
+                    "chat": {"id": 5550024, "type": "private"},
+                    "text": "/cancel",
+                },
+            },
+        )
+        assert "Nothing to cancel" in sent[-1][0]
+
+        await telegram_trade.handle_callback(session, "5550024", "pt:0:INFY:B")
+        await bot.handle_update(
+            session,
+            {
+                "update_id": 11,
+                "message": {
+                    "chat": {"id": 5550024, "type": "private"},
+                    "text": "4",
+                },
+            },
+        )
+        assert "REVIEW PAPER ORDER" in sent[-1][0]
+        assert "BUY 4 INFY" in sent[-1][0]
+        assert sent[-1][1] is not None
+        assert await telegram_trade.get_intent(session, "5550024") is None

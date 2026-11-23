@@ -1117,8 +1117,8 @@ function TelegramPanel() {
 
         <p className="text-[11px] leading-5 text-ink-dim">
           Impact alerts in Telegram carry Buy and Sell buttons for stocks in the
-          paper universe. A tap creates a proposal; nothing is submitted until you
-          confirm, and every fill is simulated.
+          paper universe. Tap one, reply with a share quantity or ₹ amount, then
+          confirm the review. Every fill is simulated.
         </p>
 
         {status && !status.trading_enabled && (
@@ -1201,7 +1201,8 @@ function TelegramPanel() {
             </div>
             <p className="font-mono text-[9px] uppercase leading-4 tracking-[0.08em] text-ink-faint">
               The code binds this Telegram chat to your signed-in Sunrise account.
-              One chat, one account.
+              One chat, one account. Sizes are typed in chat; symbols and sides
+              only come from the alert buttons.
             </p>
           </>
         )}

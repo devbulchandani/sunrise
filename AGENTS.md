@@ -104,7 +104,7 @@ Production URLs:
 - Production paper config: `PAPER_TRADING_ENABLED=true`,
   `PAPER_TRADING_FROZEN=false`, 22 NSE symbols, ₹10,00,000 opening balance,
   ₹20 simulated fee, market-hours enforcement off.
-- Backend test suite: **84 tests passing**. CI (`.github/workflows/ci.yml`) runs
+- Backend test suite: **89 tests passing**. CI (`.github/workflows/ci.yml`) runs
   pytest + `tsc` + Vite build. Keep it green.
 - The repo history was rewritten to purge an accidentally committed EC2 private
   key. The key pair no longer exists and the instance has no SSH key/port 22.
@@ -152,7 +152,7 @@ make backend               # uvicorn :8000
 make worker                # arq worker
 make scheduler             # cron + telegram poller + paper fills
 make frontend              # vite :5173
-make test                  # 84 tests
+make test                  # 89 tests
 ```
 
 - Backend config uses pydantic-settings with `env_file=(".env", "../.env")`;
@@ -244,10 +244,12 @@ Files: `backend/app/services/trading/{accounts,broker,instruments,quotes,risk}.p
 11. **Telegram bridge.** Trading callbacks are honoured only for a private chat
     already bound to a Cognito `sub` through a single-use, expiring link code
     (`PAPER_TELEGRAM_LINK_TTL_SECONDS`). Buttons carry a symbol from the fixed
-    paper universe; free text is never an order. A button creates a proposal; a
-    second tap confirms it through the same `broker.confirm_proposal` path
-    (owner-scoped, risk twice, idempotent, expiring). Refuse group chats and keep
-    `PAPER_TELEGRAM_ENABLED` as a second kill switch.
+    paper universe; the only free text accepted is a trade size (shares or ₹),
+    stored as a short-lived `telegram_trade_intents` row. That size creates a
+    proposal, and a Confirm tap submits it through the same
+    `broker.confirm_proposal` path (owner-scoped, risk twice, idempotent,
+    expiring). Refuse group chats and keep `PAPER_TELEGRAM_ENABLED` as a second
+    kill switch.
 
 Trading API (all under `/api/trading`; auth required except `/config` and
 `/instruments`): `config`, `instruments`, `quote/{symbol}`, `account`,
@@ -327,9 +329,9 @@ docker compose -f docker-compose.aws.yml up -d --build
 - **Live broker integration** (Upstox sandbox or another broker) is not built.
   It needs a separate explicit decision, broker terms/eligibility review, and
   legal/compliance review for India. Keep `TRADING_ENABLED=false` until then.
-- Telegram paper trading is intentionally a **quick ticket**: market orders, one
-  default size, no limit price or quantity picker (use the dashboard for those).
-  Group chats and shared devices are unsupported; linking is private-chat only.
+- Telegram paper trading is intentionally a **quick ticket**: market orders with
+  a chat-typed size, no limit price (use the dashboard for limits). Group chats
+  and shared devices are unsupported; linking is private-chat only.
 - Paper trading lacks **partial fills** and derivatives. The paper soak/Phase 3
   work in `docs/plans/trading-execution-phase.md` is still open.
 - Frozen mode currently blocks cancellation as well as new orders; a
@@ -345,7 +347,7 @@ docker compose -f docker-compose.aws.yml up -d --build
 1. `pwd` should be `/Users/devbulchandani/scraper-verse`.
 2. `git status` must be clean; `git log -1`.
 3. Read `README.md`, `SECURITY.md`, and the trading plan.
-4. `cd backend && ./.venv/bin/python -m pytest tests -q` (84 pass).
+4. `cd backend && ./.venv/bin/python -m pytest tests -q` (89 pass).
 5. `cd frontend && npx tsc --noEmit && npm run build`.
 6. If deploying: confirm `aws login` works, then use SSM; deploy Pages with the
    Cloudflare token from `.env`.

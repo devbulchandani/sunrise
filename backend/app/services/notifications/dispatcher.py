@@ -156,8 +156,8 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
                 # A trading-side failure must never suppress the alert itself.
                 trade_markup = None
                 try:
-                    trade_markup = await telegram_trade.trade_keyboard(
-                        session, user, event.id, payload["assets"]
+                    trade_markup = telegram_trade.trade_keyboard(
+                        user, event.id, payload["assets"]
                     )
                 except Exception as exc:
                     log.warn(
