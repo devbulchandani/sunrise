@@ -1,6 +1,6 @@
 // Sunrise API proxy — gives the HTTPS dashboard an HTTPS origin that
-// forwards to the EC2 backend over HTTP (server-to-server, no mixed content).
-const BACKEND = "http://52.7.157.152.sslip.io:8000";
+// forwards to the EC2 backend through Caddy (TLS terminated at the origin).
+const BACKEND = "https://52.7.157.152.sslip.io";
 const ALLOWED_ORIGINS = new Set([
   "https://sunrise-dashboard.pages.dev",
   "http://localhost:5173",

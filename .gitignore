@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
+!frontend/.env.production
 .wrangler/
 __pycache__/
 *.pyc
@@ -10,3 +13,9 @@ dist/
 *.egg-info/
 .DS_Store
 VIDEO_SCRIPT.md
+# never commit credentials or private keys
+*.pem
+*.key
+*.p12
+*.pfx
+.brightdata/

@@ -1,0 +1,25 @@
+# TLS termination for the Sunrise API.
+# Caddy obtains and renews a Let's Encrypt certificate for the sslip.io
+# hostname (which resolves to this instance's public IP) using HTTP-01.
+{
+	email devbulchandani876@gmail.com
+	servers {
+		protocols h1 h2
+	}
+}
+
+52.7.157.152.sslip.io {
+	encode zstd gzip
+	reverse_proxy backend:8000
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
