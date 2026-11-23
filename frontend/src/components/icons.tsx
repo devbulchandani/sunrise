@@ -266,3 +266,17 @@ export const TrendingDown = (p: IconProps) => (
 export const Dot = ({ className = "h-1.5 w-1.5" }: { className?: string }) => (
   <span className={`inline-block rounded-full bg-current ${className}`} aria-hidden="true" />
 );
+
+export const LogOut = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M14.5 4H18a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3.5" />
+    <path d="M10 8l-4 4 4 4M6 12h9" />
+  </Glyph>
+);
+
+export const Send = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M21 3 10.5 13.5" />
+    <path d="m21 3-6.5 18-4-8-8-4L21 3Z" />
+  </Glyph>
+);

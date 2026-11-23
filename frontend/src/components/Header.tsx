@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../services/auth";
 import { useNow } from "../hooks/usePolling";
@@ -6,9 +6,12 @@ import { cn } from "../lib/cn";
 import { LiveDot } from "./StatusDot";
 import {
   ArrowUpRight,
+  ChevronDown,
   Command,
+  LogOut,
   Menu,
   Search,
+  Send,
   SunriseMark,
   X,
 } from "./icons";
@@ -49,10 +52,29 @@ export function Header({
   const { pathname } = useLocation();
   const { user, ready, configured, signIn, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMenuOpen(false);
+    setProfileOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profileOpen]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-edge/80 bg-base/85 backdrop-blur-xl">
@@ -112,17 +134,72 @@ export function Header({
           {configured && ready && (
             <div className="hidden sm:block">
               {user ? (
-                <button
-                  type="button"
-                  onClick={() => void signOut()}
-                  title="Sign out"
-                  className="flex max-w-[190px] cursor-pointer items-center gap-2 rounded-lg border border-edge bg-surface-2/50 px-2.5 py-1.5 text-xs text-ink-dim transition-colors hover:border-edge-bright hover:text-ink"
-                >
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber/15 font-mono text-[9px] font-semibold text-amber">
-                    {String(user.profile.email || "S").slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="truncate">{String(user.profile.email || "Account")}</span>
-                </button>
+                <div className="relative" ref={profileRef}>
+                  <button
+                    type="button"
+                    onClick={() => setProfileOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={profileOpen}
+                    title="Account menu"
+                    className="flex max-w-[190px] cursor-pointer items-center gap-2 rounded-lg border border-edge bg-surface-2/50 px-2.5 py-1.5 text-xs text-ink-dim transition-colors hover:border-edge-bright hover:text-ink"
+                  >
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber/15 font-mono text-[9px] font-semibold text-amber">
+                      {String(user.profile.email || "S").slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="truncate">{String(user.profile.email || "Account")}</span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3 w-3 shrink-0 text-ink-faint transition-transform",
+                        profileOpen && "rotate-180",
+                      )}
+                    />
+                  </button>
+                  {profileOpen && (
+                    <div
+                      role="menu"
+                      aria-label="Account"
+                      className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-edge bg-surface shadow-2xl animate-rise"
+                    >
+                      <div className="border-b border-edge/70 px-4 py-3">
+                        <p className="label mb-1">Signed in</p>
+                        <p className="truncate text-xs text-ink">
+                          {String(user.profile.email || "Account")}
+                        </p>
+                        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">
+                          Cognito session
+                        </p>
+                      </div>
+                      <Link
+                        role="menuitem"
+                        to="/trading"
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-xs text-ink-dim transition-colors hover:bg-white/[0.04] hover:text-ink"
+                      >
+                        <ArrowUpRight className="h-3.5 w-3.5 text-amber" />
+                        Paper desk
+                      </Link>
+                      <Link
+                        role="menuitem"
+                        to="/trading#telegram"
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-xs text-ink-dim transition-colors hover:bg-white/[0.04] hover:text-ink"
+                      >
+                        <Send className="h-3.5 w-3.5 text-amber" />
+                        Telegram trading
+                      </Link>
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          void signOut();
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-2.5 border-t border-edge/70 px-4 py-2.5 text-left text-xs text-ink-dim transition-colors hover:bg-white/[0.04] hover:text-ink"
+                      >
+                        <LogOut className="h-3.5 w-3.5 text-ink-faint" />
+                        Sign out
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button
                   type="button"

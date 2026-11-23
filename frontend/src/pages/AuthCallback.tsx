@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../services/auth";
+import { takePostLoginPath, useAuth } from "../services/auth";
 import { AlertTriangle, ArrowRight, Shield, SunriseMark } from "../components/icons";
 import { Button, Panel, Pill } from "../components/ui";
 
@@ -8,19 +8,20 @@ export default function AuthCallback() {
   const { completeSignIn } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState("");
+  // React 18 StrictMode replays effects in development; the authorization code
+  // can only be exchanged once, so never start the exchange twice.
+  const started = useRef(false);
 
   useEffect(() => {
-    let active = true;
+    if (started.current) return;
+    started.current = true;
     completeSignIn()
       .then(() => {
-        if (active) navigate("/", { replace: true });
+        navigate(takePostLoginPath() ?? "/", { replace: true });
       })
       .catch(() => {
-        if (active) setError("Sign-in could not be completed. Please try again.");
+        setError("Sign-in could not be completed. Please try again.");
       });
-    return () => {
-      active = false;
-    };
   }, [completeSignIn, navigate]);
 
   return (

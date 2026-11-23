@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  InMemoryWebStorage,
   UserManager,
   WebStorageStateStore,
   type User,
@@ -19,12 +18,25 @@ interface AuthContextValue {
   user: User | null;
   ready: boolean;
   configured: boolean;
-  signIn(): Promise<void>;
+  signIn(returnTo?: string): Promise<void>;
   signOut(): Promise<void>;
   completeSignIn(): Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+/** Where to land after the Cognito redirect round-trip (tab-scoped). */
+const POST_LOGIN_KEY = "sunrise.post-login-path";
+
+export function takePostLoginPath(): string | null {
+  try {
+    const value = window.sessionStorage.getItem(POST_LOGIN_KEY);
+    window.sessionStorage.removeItem(POST_LOGIN_KEY);
+    return value && value.startsWith("/") ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 const region = import.meta.env.VITE_COGNITO_REGION || "us-east-1";
 const poolId = import.meta.env.VITE_COGNITO_USER_POOL_ID || "";
@@ -34,8 +46,10 @@ const clientId = import.meta.env.VITE_COGNITO_APP_CLIENT_ID || "";
 const devAuth = import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH === "true";
 const configured = devAuth || Boolean(poolId && clientId);
 
-// Keep bearer and refresh tokens in memory. Only temporary OAuth state/PKCE
-// material uses sessionStorage so the authorization redirect can round-trip.
+// Keep the OIDC user (access/refresh tokens) in sessionStorage so a hard
+// refresh or an embedded redirect does not silently sign the user out. The
+// store is scoped to the tab and cleared on sign-out or when the tab closes;
+// the same tab-scoped store round-trips temporary OAuth state/PKCE material.
 const manager = configured
   ? new UserManager({
       authority: `https://cognito-idp.${region}.amazonaws.com/${poolId}`,
@@ -47,7 +61,7 @@ const manager = configured
       automaticSilentRenew: true,
       monitorSession: false,
       loadUserInfo: false,
-      userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
+      userStore: new WebStorageStateStore({ store: window.sessionStorage }),
       stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
     })
   : null;
@@ -114,14 +128,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signIn = useCallback(async () => {
+  const signIn = useCallback(async (returnTo?: string) => {
     if (!manager) throw new Error("Cognito sign-in is not configured");
+    try {
+      if (returnTo && returnTo.startsWith("/")) {
+        window.sessionStorage.setItem(POST_LOGIN_KEY, returnTo);
+      } else {
+        window.sessionStorage.removeItem(POST_LOGIN_KEY);
+      }
+    } catch {
+      /* sessionStorage can be unavailable in privacy modes */
+    }
     await manager.signinRedirect();
   }, []);
 
   const signOut = useCallback(async () => {
     if (!manager) return;
-    await manager.signoutRedirect();
+    // Clear the visible session first, but keep the stored user so the OIDC
+    // end-session request can still send id_token_hint to Cognito.
+    setUser(null);
+    try {
+      await manager.signoutRedirect();
+    } catch {
+      await manager.removeUser().catch(() => undefined);
+      window.location.assign("/");
+    }
   }, []);
 
   const completeSignIn = useCallback(async () => {
