@@ -202,7 +202,7 @@ The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.work
 
 Admin actions (`Run now`, `Heal`) authenticate with the signed-in user's Cognito token against `ADMIN_EMAILS`, or with `X-Admin-Token` from a shell for CLI/ops. The dashboard never receives an admin secret. Production currently calls Bedrock Mantle through the OpenAI-compatible client using `LLM_MODEL=openai.gpt-oss-20b`, `LLM_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/v1`, and a Bedrock bearer key in `LLM_API_KEY`. The alternative Bedrock Runtime Converse provider uses `LLM_PROVIDER=bedrock`, an enabled Bedrock model ID, and the EC2 instance role. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
 
-> **Security note:** an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling. GitHub may continue to serve the old blob by commit SHA until support purges cached views; request a sensitive-data purge if that matters for your threat model.
+> **Security note:** see [SECURITY.md](SECURITY.md). an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling. GitHub may continue to serve the old blob by commit SHA until support purges cached views; request a sensitive-data purge if that matters for your threat model.
 
 The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend currently verifies Cognito access tokens for future private API routes; existing market-data routes remain public. Trading is still disabled and no broker is connected. See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
 
@@ -319,6 +319,7 @@ Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomal
 - Network/anti-bot failures are retried with backoff and alerted on, but deliberately do not trigger strategy healing — a new selector cannot fix a blocked request.
 - Playwright not wired in; JS-rendered listings aren't supported yet.
 - Urgency scoring weights are sensible defaults, not calibrated against historical price moves.
+- Schema upgrades are additive and idempotent (`app.db.upgrade`); destructive migrations would need Alembic.
 
 ## Demo script (for judges)
 
