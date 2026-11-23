@@ -912,7 +912,9 @@ function Line({ label, value }: { label: string; value: string }) {
 function PortfolioPanel({ portfolio }: { portfolio: PaperPortfolio | null }) {
   const account = portfolio?.account;
   const positions = portfolio?.positions ?? [];
-  const returnPct = portfolio?.total_return_pct ?? 0;
+  const rawReturnPct = portfolio?.total_return_pct ?? 0;
+  // A sub-basis-point move should not render as a red "-0.00%".
+  const returnPct = Math.abs(rawReturnPct) < 0.005 ? 0 : rawReturnPct;
   const allocation = [
     {
       key: "cash",
