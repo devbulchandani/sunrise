@@ -37,7 +37,7 @@ from app.services.trading.accounts import (
     get_or_create_account,
     portfolio_snapshot,
 )
-from app.services.trading.instruments import get_instrument
+from app.services.trading.instruments import get_instrument, list_instruments
 from app.services.trading.quotes import Quote, get_quote
 
 log = get_logger("trading.telegram")
@@ -443,21 +443,101 @@ def parse_size(
     return quantity, None
 
 
+PAPER_MENU_PAGE_SIZE = 4
+
+
+def _desk_url(event_id: int | None) -> str:
+    base = f"{get_settings().public_dashboard_url.rstrip('/')}/trading"
+    return f"{base}?event={event_id}" if event_id else base
+
+
+def instrument_menu(page: int, event_id: int | None) -> tuple[str, dict]:
+    """Paginated Buy/Sell menu for the whole paper universe.
+
+    Used under alerts whose impacted names are outside the curated NSE universe,
+    so every alert still has a path to a simulated trade.
+    """
+    items = list_instruments()
+    pages = max(1, (len(items) + PAPER_MENU_PAGE_SIZE - 1) // PAPER_MENU_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = items[page * PAPER_MENU_PAGE_SIZE : (page + 1) * PAPER_MENU_PAGE_SIZE]
+
+    keyboard: list[list[dict]] = []
+    for item in chunk:
+        keyboard.append(
+            [
+                {
+                    "text": f"🟢 Buy {item.symbol}",
+                    "callback_data": f"pt:{event_id or 0}:{item.symbol}:B",
+                },
+                {
+                    "text": f"🔻 Sell {item.symbol}",
+                    "callback_data": f"pt:{event_id or 0}:{item.symbol}:S",
+                },
+            ]
+        )
+
+    navigation: list[dict] = []
+    if page > 0:
+        navigation.append(
+            {
+                "text": "⬅️ Back",
+                "callback_data": f"pm:{page - 1}:{event_id or 0}",
+            }
+        )
+    if page < pages - 1:
+        navigation.append(
+            {
+                "text": "More ➡️",
+                "callback_data": f"pm:{page + 1}:{event_id or 0}",
+            }
+        )
+    if navigation:
+        keyboard.append(navigation)
+    keyboard.append(
+        [{"text": "📊 Open paper desk", "url": _desk_url(event_id)}]
+    )
+
+    text = (
+        "📈 PAPER UNIVERSE — choose a stock\n"
+        f"Page {page + 1}/{pages} · {len(items)} simulated NSE names\n\n"
+        "Tap Buy or Sell, then reply with a share quantity or ₹ amount. "
+        "/cancel aborts."
+    )
+    return text, {"inline_keyboard": keyboard}
+
+
 def trade_keyboard(
     user: User,
     event_id: int | None,
     assets: list[dict],
 ) -> dict | None:
-    """Buy and Sell buttons for the impacted paper universe, under every alert."""
-    if not paper_ready() or not user.cognito_sub or not user.telegram_chat_id:
+    """Trade controls under every alert.
+
+    Linked chats get Buy/Sell for impacted paper-universe names plus a browse
+    entry for the rest of the universe. The impacted assets are often global
+    tickers outside the NSE paper universe, so the alert must never end up with
+    no trade button at all.
+    """
+    if not user.telegram_chat_id or not paper_ready():
         return None
-    if not assets:
-        return None
+    if not user.cognito_sub:
+        return {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🔗 Connect paper trading",
+                        "url": f"{get_settings().public_dashboard_url.rstrip('/')}/trading#telegram",
+                    }
+                ]
+            ]
+        }
+
     settings = get_settings()
     keyboard: list[list[dict]] = []
     seen: set[str] = set()
 
-    for asset in assets:
+    for asset in assets or []:
         symbol = str(asset.get("symbol") or "").strip().upper()
         if not symbol or symbol in seen or get_instrument(symbol) is None:
             continue
@@ -477,17 +557,15 @@ def trade_keyboard(
         if len(keyboard) >= max(1, settings.paper_telegram_max_symbols):
             break
 
-    if not keyboard:
-        return None
-    if event_id:
-        keyboard.append(
-            [
-                {
-                    "text": "📊 Open paper desk",
-                    "url": f"{settings.public_dashboard_url.rstrip('/')}/trading?event={event_id}",
-                }
-            ]
-        )
+    keyboard.append(
+        [
+            {
+                "text": "📈 Browse paper stocks",
+                "callback_data": f"pm:0:{event_id or 0}",
+            }
+        ]
+    )
+    keyboard.append([{"text": "📊 Open paper desk", "url": _desk_url(event_id)}])
     return {"inline_keyboard": keyboard}
 
 
@@ -673,6 +751,9 @@ async def handle_callback(
         )
 
     parts = [part.strip() for part in (data or "").split(":")]
+
+    if parts[0] == "pm" and len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+        return instrument_menu(int(parts[1]), int(parts[2]) or None)
 
     if parts[0] == "pt" and len(parts) == 4 and parts[1].isdigit():
         _, raw_event, raw_symbol, raw_side = parts

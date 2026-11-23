@@ -705,3 +705,60 @@ async def test_bot_consumes_typed_reply_and_cancel(trading, monkeypatch):
         assert "BUY 4 INFY" in sent[-1][0]
         assert sent[-1][1] is not None
         assert await telegram_trade.get_intent(session, "5550024") is None
+
+
+async def test_trade_keyboard_falls_back_to_universe_menu(trading):
+    from sqlalchemy import select
+
+    async with trading["factory"]() as session:
+        code, _ = await telegram_trade.issue_link_code(session, trading["user"])
+        await telegram_trade.consume_link_code(session, code, "5550040")
+        user = (
+            await session.execute(select(User).where(User.id == trading["user"].id))
+        ).scalar_one()
+
+    keyboard = telegram_trade.trade_keyboard(user, 99, [])
+    assert keyboard is not None
+    rows = keyboard["inline_keyboard"]
+    assert rows[0][0]["callback_data"] == "pm:0:99"
+    assert rows[-1][0]["url"].endswith("/trading?event=99")
+
+
+async def test_trade_keyboard_unlinked_chat_gets_connect_button(trading):
+    from app.models.models import User
+
+    async with trading["factory"]() as session:
+        subscriber = User(
+            email="telegram-5550041@subscribers.sunrise.local",
+            telegram_chat_id="5550041",
+        )
+        session.add(subscriber)
+        await session.commit()
+        await session.refresh(subscriber)
+
+    keyboard = telegram_trade.trade_keyboard(subscriber, 5, [])
+    assert keyboard is not None
+    button = keyboard["inline_keyboard"][0][0]
+    assert "Connect" in button["text"]
+    assert button["url"].endswith("/trading#telegram")
+
+
+async def test_instrument_menu_paginates(trading):
+    async with trading["factory"]() as session:
+        code, _ = await telegram_trade.issue_link_code(session, trading["user"])
+        await telegram_trade.consume_link_code(session, code, "5550042")
+
+        text, markup = await telegram_trade.handle_callback(session, "5550042", "pm:0:99")
+        assert "Page 1/6" in text
+        rows = markup["inline_keyboard"]
+        assert rows[0][0]["callback_data"] == "pt:99:ADANIENT:B"
+        assert rows[0][1]["callback_data"] == "pt:99:ADANIENT:S"
+        assert any(button["text"] == "More ➡️" for button in rows[-2])
+
+        text, markup = await telegram_trade.handle_callback(session, "5550042", "pm:5:99")
+        assert "Page 6/6" in text
+        rows = markup["inline_keyboard"]
+        assert any(button["text"] == "⬅️ Back" for button in rows[-2])
+
+        text, _markup = await telegram_trade.handle_callback(session, "5550042", "pm:99:99")
+        assert "Page 6/6" in text

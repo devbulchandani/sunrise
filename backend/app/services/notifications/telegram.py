@@ -147,8 +147,8 @@ def format_event_message(event: dict, paper_hint: bool = False) -> str:
         lines.extend(
             [
                 "",
-                "Paper desk: tap a stock button to review a simulated trade. "
-                "Nothing is submitted until you confirm.",
+                "Paper desk: tap a button below to connect or trade a simulated "
+                "position. Nothing is submitted until you confirm.",
             ]
         )
     lines.extend(["", "AI output can be wrong. Verify before acting. Not investment advice."])

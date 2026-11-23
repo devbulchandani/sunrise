@@ -227,7 +227,10 @@ book, and P&L percentage. The same totals are available from
 impact alerts for symbols in the paper universe. Tap Buy or Sell, reply with a
 share quantity (e.g. `10`) or a rupee amount (e.g. `₹25000`), review the sized
 proposal, then confirm. Sizes are the only thing typed; the symbol and side come
-from the server-issued buttons. Linking is a one-time handshake:
+from the server-issued buttons. Every alert also carries **Browse paper stocks**
+(paginated Buy/Sell for the 22-symbol universe) so a global-ticker alert with no
+NSE mapping still has a trade path; unlinked chats get a **Connect paper trading**
+button. Linking is a one-time handshake:
 
 1. On `/trading`, open **Trade from Telegram** and generate a link code.
 2. Send `/link CODE` to [@sunrisescraperbot](https://t.me/sunrisescraperbot) from
@@ -397,7 +400,7 @@ python -m app.services.notifications.bot_subscribers
 ## Running tests
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest tests -q    # 89 tests
+cd backend && ./.venv/bin/python -m pytest tests -q    # 92 tests
 ```
 
 Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomaly detection, dedup fingerprints, candidate safety checks, accept/reject validation paths, urgency blending bounds, Telegram formatting (incl. no-prediction language), clustering similarity, and API round-trips on an isolated SQLite DB.

@@ -104,7 +104,7 @@ Production URLs:
 - Production paper config: `PAPER_TRADING_ENABLED=true`,
   `PAPER_TRADING_FROZEN=false`, 22 NSE symbols, ₹10,00,000 opening balance,
   ₹20 simulated fee, market-hours enforcement off.
-- Backend test suite: **89 tests passing**. CI (`.github/workflows/ci.yml`) runs
+- Backend test suite: **92 tests passing**. CI (`.github/workflows/ci.yml`) runs
   pytest + `tsc` + Vite build. Keep it green.
 - The repo history was rewritten to purge an accidentally committed EC2 private
   key. The key pair no longer exists and the instance has no SSH key/port 22.
@@ -152,7 +152,7 @@ make backend               # uvicorn :8000
 make worker                # arq worker
 make scheduler             # cron + telegram poller + paper fills
 make frontend              # vite :5173
-make test                  # 89 tests
+make test                  # 92 tests
 ```
 
 - Backend config uses pydantic-settings with `env_file=(".env", "../.env")`;
@@ -248,8 +248,10 @@ Files: `backend/app/services/trading/{accounts,broker,instruments,quotes,risk}.p
     stored as a short-lived `telegram_trade_intents` row. That size creates a
     proposal, and a Confirm tap submits it through the same
     `broker.confirm_proposal` path (owner-scoped, risk twice, idempotent,
-    expiring). Refuse group chats and keep `PAPER_TELEGRAM_ENABLED` as a second
-    kill switch.
+    expiring). Alerts whose impacted names are outside the NSE universe still
+    get a paginated **Browse paper stocks** fallback (and unlinked chats get a
+    Connect button), so an alert never ships without a trade affordance. Refuse
+    group chats and keep `PAPER_TELEGRAM_ENABLED` as a second kill switch.
 
 Trading API (all under `/api/trading`; auth required except `/config` and
 `/instruments`): `config`, `instruments`, `quote/{symbol}`, `account`,
@@ -347,7 +349,7 @@ docker compose -f docker-compose.aws.yml up -d --build
 1. `pwd` should be `/Users/devbulchandani/scraper-verse`.
 2. `git status` must be clean; `git log -1`.
 3. Read `README.md`, `SECURITY.md`, and the trading plan.
-4. `cd backend && ./.venv/bin/python -m pytest tests -q` (89 pass).
+4. `cd backend && ./.venv/bin/python -m pytest tests -q` (92 pass).
 5. `cd frontend && npx tsc --noEmit && npm run build`.
 6. If deploying: confirm `aws login` works, then use SSM; deploy Pages with the
    Cloudflare token from `.env`.
