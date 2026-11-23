@@ -4,6 +4,7 @@ Run with: python -m app.seed
 """
 
 import asyncio
+import os
 
 from sqlalchemy import select
 
@@ -82,7 +83,7 @@ SEED_SOURCES = [
     {
         "slug": "yahoo_finance",
         "name": "Yahoo Finance",
-        "url": "https://finance.yahoo.com/news/rssindex",
+        "url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US",
         "type": "rss",
         "schedule": "*/5 * * * *",
         "category": "MARKET_MOVEMENT",
@@ -151,7 +152,13 @@ async def seed() -> None:
 
     factory = get_session_factory()
     async with factory() as session:
+        brightdata_enabled = bool(os.environ.get("BRIGHTDATA_API_KEY"))
+
         for spec in SEED_SOURCES:
+            # Bright Data is opt-in: without a key the CLI cannot scrape and
+            # the source would fail forever.
+            if spec["slug"] == "reuters_brightdata" and not brightdata_enabled:
+                continue
             existing = (
                 await session.execute(select(Source).where(Source.slug == spec["slug"]))
             ).scalar_one_or_none()

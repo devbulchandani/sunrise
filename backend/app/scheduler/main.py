@@ -17,7 +17,7 @@ from app.models.models import Source
 from app.services.healing.agent import heal_source
 from app.services.healing.recovery import recover_stuck_healing
 from app.services.pipeline import cluster_new_articles, finalize_event
-from app.services.retention import purge_expired_articles
+from app.services.retention import purge_expired_content
 from app.services.scraping.runner import run_source
 
 setup_logging()
@@ -133,12 +133,12 @@ async def main() -> None:
     settings = get_settings()
     scheduler = AsyncIOScheduler(timezone="UTC")
     await refresh_jobs(scheduler)
-    await purge_expired_articles()
+    await purge_expired_content()
     scheduler.add_job(
-        purge_expired_articles,
+        purge_expired_content,
         CronTrigger(hour=3, minute=15),
         id="retention:articles",
-        name="purge expired articles",
+        name="purge expired content",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,

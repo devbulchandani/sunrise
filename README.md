@@ -88,7 +88,7 @@ How it works:
 3. Those entries flow through the exact same pipeline as every other source: normalization → dedup → clustering → AI analysis → alerts.
 4. Health metrics are tracked identically, so failures on this source are visible on the Scraper Health page too.
 
-This keeps a clean separation: **owned self-healing collectors for the long tail, Bright Data for the walled gardens** — both feeding one intelligence pipeline.
+This keeps a clean separation: **owned self-healing collectors for the long tail, Bright Data for the walled gardens** — both feeding one intelligence pipeline. The Bright Data source is only seeded when `BRIGHTDATA_API_KEY` is set; without credentials it would otherwise fail on every run.
 
 ## Quick start
 
@@ -213,7 +213,7 @@ git fetch origin && git reset --hard origin/main
 docker compose -f docker-compose.aws.yml up -d --build
 ```
 
-Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Article records older than `ARTICLE_RETENTION_DAYS` (30 days by default) are purged daily. The Worker origin is configured in `deploy/cloudflare/worker.js`; after an origin change, deploy it with Wrangler. Rebuild Pages with the `VITE_API_BASE` value above when its API URL changes. `deploy/aws-ec2.sh` provisions a fresh instance without an SSH key (SSM-only access) and opens only 80/443; the live instance predates it.
+Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Articles and their market events older than `ARTICLE_RETENTION_DAYS` / `EVENT_RETENTION_DAYS` (30 days by default) are purged daily, along with any orphaned events left by older runs. The Worker origin is configured in `deploy/cloudflare/worker.js`; after an origin change, deploy it with Wrangler. Rebuild Pages with the `VITE_API_BASE` value above when its API URL changes. `deploy/aws-ec2.sh` provisions a fresh instance without an SSH key (SSM-only access) and opens only 80/443; the live instance predates it.
 
 The backend startup also ensures the unique notification index exists. This makes concurrent dispatcher attempts idempotent and allows the notification scheduler to record and deliver Telegram alerts.
 
