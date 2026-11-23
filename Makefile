@@ -1,10 +1,10 @@
-.PHONY: infra backend worker scheduler frontend seed test demo-break demo-heal
+.PHONY: infra install backend worker scheduler frontend seed test demo-break demo-heal
 
 infra:
 	docker compose up -d postgres redis
 
 install:
-	cd backend && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt -e ".[dev]"
+	cd backend && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 	cd frontend && npm install
 
 backend:

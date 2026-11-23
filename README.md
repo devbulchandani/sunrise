@@ -194,10 +194,14 @@ The brief is stored on the event (`ipo_research`), rendered in the dashboard's *
 | Component | Host | Notes |
 |---|---|---|
 | Dashboard | Cloudflare Pages | `sunrise-dashboard.pages.dev`; built with `VITE_API_BASE=https://sunrise-api-proxy.devbulchandani876.workers.dev/api` |
-| API proxy | Cloudflare Worker | `sunrise-api-proxy`; origin is `http://52.7.157.152.sslip.io:8000` |
-| Backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small`, `us-east-1` | Instance `i-04187b97cb6a30803`; one instance via `docker-compose.aws.yml` |
+| API proxy | Cloudflare Worker | `sunrise-api-proxy`; origin is `https://52.7.157.152.sslip.io` |
+| TLS + backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small`, `us-east-1` | Instance `i-04187b97cb6a30803`; one instance via `docker-compose.aws.yml` |
 
-The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. The EC2 host has no SSH ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values. Production currently calls Bedrock Mantle through the OpenAI-compatible client using `LLM_MODEL=openai.gpt-oss-20b`, `LLM_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/v1`, and a Bedrock bearer key in `LLM_API_KEY`. The alternative Bedrock Runtime Converse provider uses `LLM_PROVIDER=bedrock`, an enabled Bedrock model ID, and the EC2 instance role. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
+The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. Caddy terminates TLS on ports 80/443 with a Let's Encrypt certificate for the `sslip.io` hostname and proxies to the API over the private compose network; the API itself is bound to `127.0.0.1:8000`. The EC2 host has no SSH key pair and no port 22 ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values.
+
+Admin actions (`Run now`, `Heal`) authenticate with the signed-in user's Cognito token against `ADMIN_EMAILS`, or with `X-Admin-Token` from a shell for CLI/ops. The dashboard never receives an admin secret. Production currently calls Bedrock Mantle through the OpenAI-compatible client using `LLM_MODEL=openai.gpt-oss-20b`, `LLM_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/v1`, and a Bedrock bearer key in `LLM_API_KEY`. The alternative Bedrock Runtime Converse provider uses `LLM_PROVIDER=bedrock`, an enabled Bedrock model ID, and the EC2 instance role. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
+
+> **Security note:** an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling.
 
 The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend currently verifies Cognito access tokens for future private API routes; existing market-data routes remain public. Trading is still disabled and no broker is connected. See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
 
@@ -205,11 +209,11 @@ Inside the SSM session, update the checkout and restart the stack with:
 
 ```bash
 cd /home/ubuntu/sunrise
-git pull
+git fetch origin && git reset --hard origin/main
 docker compose -f docker-compose.aws.yml up -d --build
 ```
 
-Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Article records older than `ARTICLE_RETENTION_DAYS` (30 days by default) are purged daily. The Worker origin is configured in `deploy/cloudflare/worker.js`; after an origin change, deploy it with Wrangler. Rebuild Pages with the `VITE_API_BASE` value above when its API URL changes. The older `deploy/aws-ec2.sh` script predates this setup and should not be used for the live project.
+Seed runs automatically on backend start; the scheduler picks up all sources within 60s. Article records older than `ARTICLE_RETENTION_DAYS` (30 days by default) are purged daily. The Worker origin is configured in `deploy/cloudflare/worker.js`; after an origin change, deploy it with Wrangler. Rebuild Pages with the `VITE_API_BASE` value above when its API URL changes. `deploy/aws-ec2.sh` provisions a fresh instance without an SSH key (SSM-only access) and opens only 80/443; the live instance predates it.
 
 The backend startup also ensures the unique notification index exists. This makes concurrent dispatcher attempts idempotent and allows the notification scheduler to record and deliver Telegram alerts.
 
@@ -250,6 +254,12 @@ GET  /api/stats                      GET  /api/stream   (SSE live updates)
 GET  /api/preferences                PUT  /api/preferences
 ```
 
+`POST /api/scrapers/{id}/run` and `/heal` enqueue work on the arq worker and
+return immediately; the dashboard polls the run/healing history for results.
+Admin routes accept `X-Admin-Token` (ops) or a Cognito access token whose email
+is listed in `ADMIN_EMAILS`. The SSE stream emits `new`, `alerts`,
+`scraper_failure`, and `healed` events.
+
 ## Telegram setup
 
 1. Talk to [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN`.
@@ -289,7 +299,7 @@ python -m app.services.notifications.bot_subscribers
 ## Running tests
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest tests -q    # 40 tests
+cd backend && ./.venv/bin/python -m pytest tests -q    # 55 tests
 ```
 
 Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomaly detection, dedup fingerprints, candidate safety checks, accept/reject validation paths, urgency blending bounds, Telegram formatting (incl. no-prediction language), clustering similarity, and API round-trips on an isolated SQLite DB.
@@ -303,8 +313,9 @@ Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomal
 
 ## Known limitations
 
-- Single-tenant demo user model (no auth beyond admin token gating).
-- Event clustering is fuzzy-title based within a 48h window — sophisticated entity resolution is future work.
+- Preferences still use the single-tenant demo user; dashboard sign-in currently gates admin actions and `/api/auth/me`.
+- Event clustering combines fuzzy title matching with token overlap inside a 48h window. It rejects template headlines ("X Share Price Live Updates") but is not full entity resolution.
+- Network/anti-bot failures are retried with backoff and alerted on, but deliberately do not trigger strategy healing — a new selector cannot fix a blocked request.
 - Playwright not wired in; JS-rendered listings aren't supported yet.
 - Urgency scoring weights are sensible defaults, not calibrated against historical price moves.
 
