@@ -67,3 +67,277 @@ Constraints for each level:
 - MUST flag best practices and explain trade-offs
 - MUST still execute the user's choice if they disagree with a suggestion
 <!-- END AWS Agent Toolkit rules -->
+
+---
+
+# Sunrise — project guide for agents
+
+> Last updated: **2026-11-23** (paper-trading release).
+> Read this before changing code. The AWS block above still applies to AWS work;
+> the project-specific instructions below take precedence where they conflict.
+
+## 1. What this is
+
+Sunrise is an autonomous financial-intelligence platform. It scrapes public
+financial news, clusters articles into market events, scores urgency with an LLM,
+sends Telegram/email alerts, and repairs broken scrapers with a validated
+LLM-generated extraction strategy. It also now ships a **paper-trading desk**.
+
+Production URLs:
+
+- Dashboard: https://sunrise-dashboard.pages.dev
+- Paper desk: https://sunrise-dashboard.pages.dev/trading
+- API proxy (Cloudflare Worker): https://sunrise-api-proxy.devbulchandani876.workers.dev/api
+- Origin (Caddy TLS): https://52.7.157.152.sslip.io
+- Repo: https://github.com/devbulchandani/sunrise
+
+## 2. Current state (important)
+
+- Market pipeline is live on AWS EC2 `i-04187b97cb6a30803` (`t4g.small`, `us-east-1`) with Caddy TLS, Postgres, Redis, API, arq worker, and scheduler.
+- **Paper trading is implemented, tested, and deployed.** It is a Sunrise-owned
+  simulator: simulated quotes, per-user ledger, manual confirmation, risk checks,
+  audit trail. It does **not** connect to Upstox/Zerodha/any broker.
+- **Live trading is deliberately disabled.** `TRADING_ENABLED=false` and no live
+  order routes exist. Do not enable live trading without an explicit user decision,
+  broker integration, and legal/compliance review.
+- Production paper config: `PAPER_TRADING_ENABLED=true`,
+  `PAPER_TRADING_FROZEN=false`, 22 NSE symbols, ₹10,00,000 opening balance,
+  ₹20 simulated fee, market-hours enforcement off.
+- Backend test suite: **69 tests passing**. CI (`.github/workflows/ci.yml`) runs
+  pytest + `tsc` + Vite build. Keep it green.
+- The repo history was rewritten to purge an accidentally committed EC2 private
+  key. The key pair no longer exists and the instance has no SSH key/port 22.
+  GitHub may still serve the old blob by SHA until support purges cached views.
+
+## 3. Stack and layout
+
+```
+backend/                 FastAPI + async SQLAlchemy 2 + Pydantic v2
+  app/api/               public market routes + trading router
+  app/core/              config, auth, logging, redis
+  app/db/                session + additive schema upgrades
+  app/llm/               provider-agnostic client + output schemas
+  app/models/            all SQLAlchemy tables
+  app/services/
+    analysis/            clustering, analyzer, urgency, research, IPO
+    deduplication/
+    healing/             agent, validation, prompts, recovery
+    notifications/       telegram, email, dispatcher, bot, ops alerts
+    scraping/            fetcher, extractor, runner, health, lock, adapters
+    trading/             accounts, broker, instruments, quotes, risk
+  app/workers/           arq tasks
+  app/scheduler/         APScheduler cron + paper open-order fills
+  tests/                 pytest suite
+frontend/                React 18 + Vite 5 + TypeScript + Tailwind 3
+  src/components/        Header, ui, icons, charts, ticker, palette
+  src/pages/             MarketPulse, EventDetail, Scrapers, System, Trading
+  src/services/          api, auth, trading
+deploy/                  Caddyfile, EC2 bootstrap, Cloudflare Worker
+docs/plans/              trading phase plan
+```
+
+Key docs: `README.md`, `SECURITY.md`, `docs/plans/trading-execution-phase.md`.
+
+## 4. Run locally
+
+Prerequisites: Python 3.12+ (Docker uses 3.13), Node 20+, Docker.
+
+```bash
+make infra                 # postgres + redis
+cp .env.example .env       # fill LLM/Telegram keys as needed
+make install               # backend venv + npm install
+make seed                  # create tables + sources + demo user
+make backend               # uvicorn :8000
+make worker                # arq worker
+make scheduler             # cron + telegram poller + paper fills
+make frontend              # vite :5173
+make test                  # 69 tests
+```
+
+- Backend config uses pydantic-settings with `env_file=(".env", "../.env")`;
+  later files take precedence. Shell env overrides both.
+- Frontend dev proxies `/api` to `localhost:8000`; production uses
+  `VITE_API_BASE` from `frontend/.env.production`.
+- `make install` uses `pip install -r requirements.txt` (there is no package
+  metadata; do not reintroduce `-e ".[dev]"`).
+
+### Local paper-desk UI without real Cognito
+
+`src/services/auth.tsx` has a **dev-only** bypass:
+
+```bash
+VITE_DEV_AUTH=true VITE_API_BASE=http://127.0.0.1:8001/api npm run dev
+```
+
+It is guarded by `import.meta.env.DEV`, so production builds contain no bypass.
+For local backend QA, run the app with `require_paper_trader` overridden in a
+throwaway script (or a valid Cognito token). Never add a production auth bypass.
+
+## 5. Configuration and secrets
+
+- `.env` files are gitignored. Never commit secrets, `.pem`, `.key`, or
+  `.brightdata/`.
+- Production runtime uses `/home/ubuntu/sunrise/.env` on EC2. The same settings
+  are stored in AWS Secrets Manager (`sunrise/production/app-env`) but **are not
+  auto-synced**; when changing production config, update the instance `.env`
+  and the secret.
+- `ADMIN_TOKEN` gates operational endpoints from CLI/curl; it is never shipped to
+  the browser. `ADMIN_EMAILS` is the Cognito email allowlist for dashboard
+  admin actions. With neither set (local dev), admin routes are open by design.
+- Cognito is the only user auth: access tokens are verified (RS256, issuer,
+  `token_use`, client ID) in `app/core/auth.py`. Public market-data reads remain
+  public; account/order data is authenticated.
+- CORS is restricted to the Pages dashboard and local hosts. Caddy terminates TLS;
+  only 80/443 are public; the API binds to `127.0.0.1:8000`.
+- The Cloudflare API token lives in root `.env` as `CLOUDFARE_API_TOKEN` (spelling
+  is intentional). Do not print or commit it; rotate any token pasted into chat.
+
+## 6. Data and schema rules
+
+- `app/db/upgrade.py::ensure_schema()` is the migration path: `create_all` plus
+  idempotent additive DDL. There is no Alembic. New tables appear automatically;
+  new columns on existing Postgres tables need an explicit
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `upgrade.py`.
+- `Article` has a unique `(source_id, url)` index and inserts use
+  `ON CONFLICT DO NOTHING`; feeds can repeat URLs in one batch. Do not replace
+  this with plain inserts.
+- `market_events`/`articles` share a retention lifecycle; old events and orphaned
+  events are purged. Do not reintroduce orphan event rows.
+- SQLite tests return naive datetimes; use the `_aware()` helper pattern in
+  trading code when comparing to `datetime.now(timezone.utc)`.
+- Money uses `Decimal`/`Numeric(18,2|4)`, never floats, inside the ledger.
+- Use `select(...).with_for_update()` on account/proposal rows for order mutations.
+
+## 7. Paper-trading invariants — do not break
+
+Files: `backend/app/services/trading/{accounts,broker,instruments,quotes,risk}.py`,
+`backend/app/api/trading.py`, `backend/app/schemas/trading.py`,
+`frontend/src/pages/Trading.tsx`, `backend/tests/test_trading.py`.
+
+1. **No live broker.** No broker credentials, no live order endpoint, no network
+   call to a broker. `TRADING_ENABLED` stays false.
+2. **Simulated quotes only.** `quotes.py` generates deterministic simulated INR
+   prices; every API/UI surface must label them `simulated`.
+3. **Manual confirmation.** A proposal can be created from a signal, but no order
+   is submitted until the authenticated user calls
+   `POST /api/trading/proposals/{id}/confirm`. Never accept LLM/Telegram text as
+   an order payload.
+4. **Risk twice.** `evaluate_order()` runs at proposal time and again at confirm
+   time with a fresh quote. Keep both passes.
+5. **Idempotency.** `(account_id, client_order_id)` and `proposal_id` are unique;
+   confirmation is idempotent. Do not remove the constraints or the existing-order
+   return path.
+6. **Audit.** Proposal/fill/rejection/cancel events go to `audit_events`; cash and
+   position changes are transactional with the order.
+7. **Kill switches.** `PAPER_TRADING_ENABLED` disables the desk.
+   `PAPER_TRADING_FROZEN` currently blocks the whole paper API, including
+   cancellation, and open-order fills. If you split read/cancel access from
+   new-order access, keep cancellation available while frozen.
+8. **Account isolation.** Accounts/positions/orders are keyed to the Cognito
+   `sub` via `users.cognito_sub`; never query another user's account by ID alone.
+9. **Fills.** Market orders fill immediately with simulated slippage; LIMIT
+   orders fill only when crossed, otherwise rest OPEN and are filled by the
+   scheduler. Cancellation is only valid for OPEN orders.
+10. **Tests.** Extend `backend/tests/test_trading.py` for any change to risk,
+    fills, idempotency, cancel, reconciliation, or auth behavior.
+
+Trading API (all under `/api/trading`; auth required except `/config` and
+`/instruments`): `config`, `instruments`, `quote/{symbol}`, `account`,
+`positions`, `orders`, `audit`, `proposals`, `proposals/{id}/confirm`,
+`proposals/{id}/reject`, `orders/{id}/cancel`, admin `reconcile`.
+
+## 8. Frontend guide
+
+- Design system: Instrument Serif display, Geist UI, JetBrains Mono data.
+  Ink-navy surfaces, single amber accent, jade/rose semantic colors. Keep new UI
+  inside `components/ui.tsx`, `icons.tsx`, `Sparkline.tsx`, `Ticker.tsx`.
+- Tailwind is v3; tokens live in `tailwind.config.js` and `src/index.css`.
+  Use `.panel`, `.label`, `.display`, `.num`, `.stagger`, focus rings, and reduced
+  motion. Avoid new colors/fonts without a reason.
+- Routes are lazy-loaded in `App.tsx`; keep heavy pages (charts/Trading) lazy.
+- `services/api.ts::request()` adds the Cognito bearer token and maps API errors
+  to `ApiError`. Reuse it; do not bypass auth.
+- Admin/paper actions require sign-in; the dashboard header handles Cognito
+  sign-in/sign-out.
+- The article drawer and review modal use `createPortal` so they layer above the
+  sticky header. Keep portal/dialog/Escape/scroll-lock behavior.
+- Verify with `npx tsc --noEmit` and `npm run build` before committing. CI also
+  runs both.
+
+## 9. Deployment
+
+### AWS
+
+All commands below are run on the instance via SSM (no SSH):
+
+```bash
+export HOME=/root
+git config --global --add safe.directory /home/ubuntu/sunrise
+cd /home/ubuntu/sunrise
+git fetch origin && git reset --hard origin/main
+docker compose -f docker-compose.aws.yml up -d --build
+```
+
+- Use `git fetch && git reset --hard` (history was rewritten; `git pull` may fail).
+- Caddy obtains/renews the Let's Encrypt cert for `52.7.157.152.sslip.io`.
+- AWS CLI uses an SSO/root login session that expires. Run `aws login` first;
+  `aws sts get-caller-identity` should work before using SSM.
+- The instance has no SSH key pair or port 22 ingress. If the IP changes, update
+  the Caddyfile hostname and the Worker `BACKEND` constant.
+- Never print secret values from Secrets Manager.
+
+### Cloudflare
+
+- Worker source: `deploy/cloudflare/worker.js` (origin is the HTTPS Caddy host).
+- Dashboard: `frontend/dist` deployed to Pages project `sunrise-dashboard`,
+  branch `main`.
+- Deploy commands use `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`; do not
+  commit the token. This machine has had intermittent DNS failures resolving
+  `api.cloudflare.com`; fix the resolver for the session (the earlier session
+  used a temporary Node preload or `curl --resolve`) but never add that workaround
+  to the repo.
+
+## 10. Conventions
+
+- Python: async SQLAlchemy, Pydantic v2, typed functions, structured loggers
+  (`get_logger`), `Decimal` for money, no bare `except` unless deliberate.
+- Tests: pytest, isolated SQLite where possible; run `pytest tests -q`.
+- Commits: imperative, sentence case, one concern per commit (matches history).
+- Never commit generated artifacts, `.env`, `dist/`, `.venv/`, `node_modules/`,
+  or keys. `.gitignore` already covers them.
+- Prefer additive changes to existing endpoints/models; do not break public
+  market-data routes or the paper-desk auth boundary.
+- For production changes, verify through the Worker with a real request and, when
+  relevant, check the origin over TLS.
+
+## 11. Known gaps / next steps
+
+- **Live broker integration** (Upstox sandbox or another broker) is not built.
+  It needs a separate explicit decision, broker terms/eligibility review, and
+  legal/compliance review for India. Keep `TRADING_ENABLED=false` until then.
+- Telegram **order confirmation** is not implemented; it remains notification-only.
+  If added, use short-lived single-use proposals, chat allowlisting, expiry,
+  replay protection, and the same server-side risk policy.
+- Paper trading lacks **partial fills** and derivatives. The paper soak/Phase 3
+  work in `docs/plans/trading-execution-phase.md` is still open.
+- Frozen mode currently blocks cancellation as well as new orders; a
+  read/cancel-only dependency would restore the plan's cancel-open-orders control.
+- No Alembic; schema upgrades are additive. Destructive migrations need a plan.
+- Urgency weights are defaults, not calibrated against market outcomes.
+- Clustering is fuzzy title + token overlap; deeper entity resolution is future work.
+- GitHub may still serve the old leaked-key blob; request a sensitive-data purge
+  or keep the repo private until purged.
+
+## 12. Quick start for a new session
+
+1. `pwd` should be `/Users/devbulchandani/scraper-verse`.
+2. `git status` must be clean; `git log -1`.
+3. Read `README.md`, `SECURITY.md`, and the trading plan.
+4. `cd backend && ./.venv/bin/python -m pytest tests -q` (69 pass).
+5. `cd frontend && npx tsc --noEmit && npm run build`.
+6. If deploying: confirm `aws login` works, then use SSM; deploy Pages with the
+   Cloudflare token from `.env`.
+7. Verify `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/trading/config`
+   reports `paper_enabled=true`, `live_enabled=false`, and that
+   `/api/trading/account` returns 401 without a token.
+8. Do not enable live trading.
