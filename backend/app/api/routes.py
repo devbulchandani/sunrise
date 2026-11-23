@@ -240,6 +240,7 @@ async def scrapers_health(db: AsyncSession = Depends(get_db)):
         )
         active_healing = active_healing_result.scalar_one_or_none()
 
+        last_run = runs[0] if runs else None
         out.append(
             {
                 "source_id": source.id,
@@ -247,11 +248,17 @@ async def scrapers_health(db: AsyncSession = Depends(get_db)):
                 "name": source.name,
                 "health_status": source.health_status,
                 "strategy_version": source.current_strategy_version,
-                "last_run_at": runs[0].started_at if runs else None,
+                "last_run_at": last_run.started_at if last_run else None,
                 "last_success_at": source.last_success_at,
                 "last_failure_at": source.last_failure_at,
-                "last_error_type": next((r.error_type for r in runs if r.error_type), None),
-                "last_articles_found": next((r.articles_found for r in runs), None),
+                # Only surface an error for the most recent run; a healthy
+                # source should not keep showing an old failure forever.
+                "last_error_type": (
+                    last_run.error_type
+                    if last_run is not None and last_run.status == "FAILED"
+                    else None
+                ),
+                "last_articles_found": last_run.articles_found if last_run else None,
                 "success_rate_24h": success_rate,
                 "healing_attempts_total": healing_total,
                 "active_healing_event_id": active_healing,

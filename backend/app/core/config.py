@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     snapshot_retention_per_source: int = 5
     article_retention_days: int = 30
     event_retention_days: int = 30
-    source_lock_seconds: int = 900
+    source_lock_seconds: int = 300
 
     # run live market-context research for events at/above this urgency
     market_research_min_urgency: int = 50
