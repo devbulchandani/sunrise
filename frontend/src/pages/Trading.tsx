@@ -113,7 +113,10 @@ export default function Trading() {
     if (!config || symbol) return;
     const requested = params.get("symbol")?.toUpperCase();
     const valid = config.instruments.some((item) => item.symbol === requested);
-    setSymbol(valid && requested ? requested : config.instruments[0]?.symbol ?? "");
+    const preferred =
+      config.instruments.find((item) => item.symbol === "RELIANCE") ??
+      config.instruments[0];
+    setSymbol(valid && requested ? requested : preferred?.symbol ?? "");
   }, [config, params, symbol]);
 
   useEffect(() => {

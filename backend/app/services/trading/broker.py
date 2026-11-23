@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.models import (
     AuditEvent,
+    MarketEvent,
     PaperAccount,
     PaperLedgerEntry,
     PaperOrder,
@@ -209,6 +210,15 @@ async def create_proposal(
         raise TradingError("Quantity must be between 1 and 1,000,000.", 400)
     if order_type == "LIMIT" and (limit is None or limit <= 0):
         raise TradingError("A limit order needs a positive limit price.", 400)
+
+    if event_id is not None:
+        linked = (
+            await session.execute(
+                select(MarketEvent.id).where(MarketEvent.id == event_id)
+            )
+        ).scalar_one_or_none()
+        if linked is None:
+            event_id = None
 
     account = await get_or_create_account(session, user)
     quote = get_quote(symbol)

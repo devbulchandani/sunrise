@@ -1,6 +1,6 @@
 # Sunrise trading execution: next phase plan
 
-Status: **paper trading implemented and deployed**. Live broker integration is not connected and no live orders can be submitted.
+Status: **paper trading implemented and deployed**. The authenticated Paper Desk is live at `/trading` on the dashboard; live broker integration is not connected and no live orders can be submitted.
 
 ## Current project state
 
@@ -59,6 +59,8 @@ Sunrise scrapes market news, clusters articles, analyzes events through an LLM, 
 - Durable audit events for proposal creation, confirmation, fill, rejection, and cancellation; an admin reconciliation endpoint recomputes cash and positions from filled orders.
 - Authenticated dashboard **Paper desk** with account summary, order ticket, risk-check review modal, positions, orders, cancellation, and per-order limits.
 - Independent `PAPER_TRADING_ENABLED` and `PAPER_TRADING_FROZEN` kill switches; `TRADING_ENABLED` remains false and no live broker credentials exist.
+
+**Deployed and verified:** production `/api/trading/config` reports `paper_enabled=true`, `live_enabled=false`, 22 instruments and a ₹10,00,000 opening balance; `/api/trading/account` returns 401 without a bearer token; the paper tables (`paper_accounts`, `paper_positions`, `paper_orders`, `trade_proposals`, `paper_ledger`, `audit_events`) and `users.cognito_sub` exist; the CI suite is green with 69 backend tests.
 
 **Still open for the full Phase 2 exit:** Telegram-originated confirmation (orders are dashboard-confirmed only), Upstox connector contract tests, partial fills, and a multi-session paper soak.
 
