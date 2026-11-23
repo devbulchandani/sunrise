@@ -5,6 +5,7 @@ const TIER_STYLES: Record<string, string> = {
   HIGH: "border-amber/60 bg-amber/10 text-amber",
   MODERATE: "border-sky-500/50 bg-sky-500/10 text-sky-400",
   RELEVANT: "border-edge-bright bg-surface-2 text-ink-dim",
+  LOW: "border-edge bg-surface-2 text-ink-faint",
 };
 
 export function UrgencyBadge({ urgency }: { urgency: number | null | undefined }) {

@@ -75,7 +75,7 @@ bdata login                      # OAuth, once
 # or: BRIGHTDATA_API_KEY=... in .env
 ```
 
-Register a Bright Data-backed source (already seeded as `reuters_brightdata`):
+Register a Bright Data-backed source (seeded automatically only when `BRIGHTDATA_API_KEY` is set):
 
 ```json
 {"slug": "reuters_brightdata", "name": "MarketWatch via Bright Data",
@@ -147,7 +147,8 @@ See `.env.example`. Key ones:
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
 | `SMTP_*` / `EMAIL_FROM` | Email digests (optional) |
 | `DEMO_MODE` | Enables demo break/heal commands |
-| `ADMIN_TOKEN` | If set, required as `X-Admin-Token` on debug endpoints |
+| `ADMIN_TOKEN` | Ops-only token for `X-Admin-Token` on debug endpoints; never shipped to the browser |
+| `ADMIN_EMAILS` | Comma-separated Cognito emails allowed to trigger runs/healing from the dashboard |
 
 ## Demo mode — watch Sunrise heal itself
 
@@ -197,11 +198,11 @@ The brief is stored on the event (`ipo_research`), rendered in the dashboard's *
 | API proxy | Cloudflare Worker | `sunrise-api-proxy`; origin is `https://52.7.157.152.sslip.io` |
 | TLS + backend + worker + scheduler + Postgres + Redis | AWS EC2 `t4g.small`, `us-east-1` | Instance `i-04187b97cb6a30803`; one instance via `docker-compose.aws.yml` |
 
-The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. Caddy terminates TLS on ports 80/443 with a Let's Encrypt certificate for the `sslip.io` hostname and proxies to the API over the private compose network; the API itself is bound to `127.0.0.1:8000`. The EC2 host has no SSH key pair and no port 22 ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are loaded from AWS Secrets Manager (`sunrise/production/app-env`) using the instance role. Never copy a local `.env` onto the host or commit secret values.
+The backend health endpoint is `https://sunrise-api-proxy.devbulchandani876.workers.dev/api/health`. Caddy terminates TLS on ports 80/443 with a Let's Encrypt certificate for the `sslip.io` hostname and proxies to the API over the private compose network; the API itself is bound to `127.0.0.1:8000`. The EC2 host has no SSH key pair and no port 22 ingress; connect through Systems Manager with `aws ssm start-session --target i-04187b97cb6a30803 --profile sunrise-new --region us-east-1`. Runtime secrets and settings are stored in AWS Secrets Manager (`sunrise/production/app-env`) and materialized into the instance's `.env` at deploy time. Never copy a local `.env` onto the host or commit secret values.
 
 Admin actions (`Run now`, `Heal`) authenticate with the signed-in user's Cognito token against `ADMIN_EMAILS`, or with `X-Admin-Token` from a shell for CLI/ops. The dashboard never receives an admin secret. Production currently calls Bedrock Mantle through the OpenAI-compatible client using `LLM_MODEL=openai.gpt-oss-20b`, `LLM_BASE_URL=https://bedrock-mantle.us-east-1.api.aws/v1`, and a Bedrock bearer key in `LLM_API_KEY`. The alternative Bedrock Runtime Converse provider uses `LLM_PROVIDER=bedrock`, an enabled Bedrock model ID, and the EC2 instance role. For Telegram, set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the scheduler starts the bot poller and dispatches qualifying alerts to subscribed chats.
 
-> **Security note:** an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling.
+> **Security note:** an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling. GitHub may continue to serve the old blob by commit SHA until support purges cached views; request a sensitive-data purge if that matters for your threat model.
 
 The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend currently verifies Cognito access tokens for future private API routes; existing market-data routes remain public. Trading is still disabled and no broker is connected. See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
 
