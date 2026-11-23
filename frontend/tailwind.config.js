@@ -4,66 +4,88 @@ export default {
   theme: {
     extend: {
       colors: {
-        base: "#0a0e14",
-        surface: "#11161f",
-        "surface-2": "#161d29",
-        edge: "#1c2530",
-        "edge-bright": "#2a3646",
-        ink: "#d5dbe4",
-        "ink-dim": "#8b95a5",
-        "ink-faint": "#5a6472",
+        base: "#05080D",
+        "base-soft": "#070C13",
+        surface: "#0A111A",
+        "surface-2": "#0F1824",
+        "surface-3": "#152131",
+        edge: "#1A2433",
+        "edge-bright": "#2A3A50",
+        ink: "#F2F5F9",
+        "ink-dim": "#A6B2C2",
+        "ink-faint": "#7B8899",
         amber: {
-          DEFAULT: "#f59e0b",
-          dim: "#78350f",
-          soft: "rgba(245,158,11,0.12)",
+          DEFAULT: "#F5A623",
+          dim: "#8A4E0A",
+          soft: "#2A1C08",
         },
-        bull: "#10b981",
-        bear: "#ef4444",
-        heal: "#a855f7",
+        bull: "#42D9A0",
+        bear: "#FF6B81",
+        heal: "#5EEAD4",
+        info: "#7DD3FC",
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["Geist", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Instrument Serif", "Georgia", "ui-serif", "serif"],
         mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
       },
-      animation: {
-        "live-dot": "liveDot 1.6s ease-in-out infinite",
-        "heal-dot": "healDot 1.2s ease-in-out infinite",
-        "fade-in": "fadeIn 0.35s ease-out both",
-        "fade-in-up": "fadeInUp 0.4s ease-out both",
-        "glow-critical": "glowCritical 2.2s ease-in-out infinite",
-        shimmer: "shimmer 1.8s linear infinite",
+      boxShadow: {
+        panel:
+          "inset 0 1px 0 0 rgba(255,255,255,0.035), 0 30px 70px -50px rgba(0,0,0,0.95)",
+        "panel-hover":
+          "inset 0 1px 0 0 rgba(255,255,255,0.06), 0 36px 80px -45px rgba(0,0,0,0.95)",
+        "glow-amber":
+          "0 0 0 1px rgba(245,166,35,0.16), 0 24px 70px -35px rgba(245,166,35,0.28)",
+        "glow-bear":
+          "0 0 0 1px rgba(255,107,129,0.16), 0 24px 70px -35px rgba(255,107,129,0.24)",
+      },
+      backgroundImage: {
+        dawn:
+          "radial-gradient(110% 80% at 12% -10%, rgba(245,166,35,0.13), transparent 55%), radial-gradient(80% 60% at 92% -4%, rgba(94,234,212,0.07), transparent 60%)",
+        grid:
+          "linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px)",
       },
       keyframes: {
-        liveDot: {
-          "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.25" },
+        rise: {
+          from: { opacity: "0", transform: "translateY(16px)", filter: "blur(6px)" },
+          to: { opacity: "1", transform: "translateY(0)", filter: "blur(0)" },
         },
-        healDot: {
-          "0%, 100%": { opacity: "1", transform: "scale(1)" },
-          "50%": { opacity: "0.45", transform: "scale(1.35)" },
-        },
-        fadeIn: {
+        fade: {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
-        fadeInUp: {
-          from: { opacity: "0", transform: "translateY(10px)" },
-          to: { opacity: "1", transform: "translateY(0)" },
+        marquee: {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
         },
-        glowCritical: {
-          "0%, 100%": {
-            boxShadow:
-              "0 0 0 1px rgba(239,68,68,0.55), 0 0 24px rgba(239,68,68,0.18)",
-          },
-          "50%": {
-            boxShadow:
-              "0 0 0 1px rgba(239,68,68,0.9), 0 0 42px rgba(239,68,68,0.32)",
-          },
+        pulseSoft: {
+          "0%, 100%": { opacity: "1", transform: "scale(1)" },
+          "50%": { opacity: "0.45", transform: "scale(0.86)" },
         },
-        shimmer: {
+        sweep: {
           from: { backgroundPosition: "200% 0" },
           to: { backgroundPosition: "-200% 0" },
         },
+        glow: {
+          "0%, 100%": { opacity: "0.55" },
+          "50%": { opacity: "1" },
+        },
+        draw: {
+          from: { strokeDashoffset: "300" },
+          to: { strokeDashoffset: "0" },
+        },
+      },
+      animation: {
+        rise: "rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both",
+        fade: "fade 0.5s ease-out both",
+        marquee: "marquee 55s linear infinite",
+        "pulse-soft": "pulseSoft 2.4s ease-in-out infinite",
+        sweep: "sweep 8s linear infinite",
+        glow: "glow 3.2s ease-in-out infinite",
+        draw: "draw 1.4s ease-out both",
+      },
+      transitionTimingFunction: {
+        "out-expo": "cubic-bezier(0.16, 1, 0.3, 1)",
       },
     },
   },
