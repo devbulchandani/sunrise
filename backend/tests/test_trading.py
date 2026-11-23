@@ -720,7 +720,10 @@ async def test_trade_keyboard_falls_back_to_universe_menu(trading):
     keyboard = telegram_trade.trade_keyboard(user, 99, [])
     assert keyboard is not None
     rows = keyboard["inline_keyboard"]
-    assert rows[0][0]["callback_data"] == "pm:0:99"
+    # The first universe page is inlined so the alert always shows Buy/Sell.
+    assert rows[0][0]["callback_data"] == "pt:99:RELIANCE:B"
+    assert rows[0][1]["callback_data"] == "pt:99:RELIANCE:S"
+    assert any(button["text"] == "More ➡️" for button in rows[-2])
     assert rows[-1][0]["url"].endswith("/trading?event=99")
 
 
@@ -751,8 +754,8 @@ async def test_instrument_menu_paginates(trading):
         text, markup = await telegram_trade.handle_callback(session, "5550042", "pm:0:99")
         assert "Page 1/6" in text
         rows = markup["inline_keyboard"]
-        assert rows[0][0]["callback_data"] == "pt:99:ADANIENT:B"
-        assert rows[0][1]["callback_data"] == "pt:99:ADANIENT:S"
+        assert rows[0][0]["callback_data"] == "pt:99:RELIANCE:B"
+        assert rows[0][1]["callback_data"] == "pt:99:RELIANCE:S"
         assert any(button["text"] == "More ➡️" for button in rows[-2])
 
         text, markup = await telegram_trade.handle_callback(session, "5550042", "pm:5:99")

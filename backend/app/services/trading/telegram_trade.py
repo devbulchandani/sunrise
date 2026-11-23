@@ -444,6 +444,23 @@ def parse_size(
 
 
 PAPER_MENU_PAGE_SIZE = 4
+# Liquid large caps first so the inline page shown under an alert is useful.
+PAPER_MENU_ORDER = [
+    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+    "BHARTIARTL", "ITC", "LT", "AXISBANK", "KOTAKBANK", "BAJFINANCE",
+    "MARUTI", "SUNPHARMA", "TITAN", "TATASTEEL", "ADANIENT",
+    "ASIANPAINT", "HINDUNILVR", "WIPRO", "NIFTYBEES", "GOLDBEES",
+]
+
+
+def _ordered_instruments():
+    by_symbol = {item.symbol: item for item in list_instruments()}
+    ordered = [by_symbol[s] for s in PAPER_MENU_ORDER if s in by_symbol]
+    known = set(PAPER_MENU_ORDER)
+    ordered.extend(
+        item for item in list_instruments() if item.symbol not in known
+    )
+    return ordered
 
 
 def _desk_url(event_id: int | None) -> str:
@@ -457,7 +474,7 @@ def instrument_menu(page: int, event_id: int | None) -> tuple[str, dict]:
     Used under alerts whose impacted names are outside the curated NSE universe,
     so every alert still has a path to a simulated trade.
     """
-    items = list_instruments()
+    items = _ordered_instruments()
     pages = max(1, (len(items) + PAPER_MENU_PAGE_SIZE - 1) // PAPER_MENU_PAGE_SIZE)
     page = max(0, min(page, pages - 1))
     chunk = items[page * PAPER_MENU_PAGE_SIZE : (page + 1) * PAPER_MENU_PAGE_SIZE]
@@ -557,16 +574,23 @@ def trade_keyboard(
         if len(keyboard) >= max(1, settings.paper_telegram_max_symbols):
             break
 
-    keyboard.append(
-        [
-            {
-                "text": "📈 Browse paper stocks",
-                "callback_data": f"pm:0:{event_id or 0}",
-            }
-        ]
-    )
-    keyboard.append([{"text": "📊 Open paper desk", "url": _desk_url(event_id)}])
-    return {"inline_keyboard": keyboard}
+    if keyboard:
+        keyboard.append(
+            [
+                {
+                    "text": "📈 Browse paper stocks",
+                    "callback_data": f"pm:0:{event_id or 0}",
+                }
+            ]
+        )
+        keyboard.append([{"text": "📊 Open paper desk", "url": _desk_url(event_id)}])
+        return {"inline_keyboard": keyboard}
+
+    # No impacted name mapped to the NSE paper universe (common for global
+    # tickers). Show the first live trade page inline so every alert still has
+    # visible Buy/Sell buttons, with More paging through the rest.
+    _text, menu = instrument_menu(0, event_id)
+    return menu
 
 
 def proposal_prompt(proposal: TradeProposal, quote_price: float, fee: float) -> str:

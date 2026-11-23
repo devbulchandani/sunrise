@@ -248,10 +248,10 @@ Files: `backend/app/services/trading/{accounts,broker,instruments,quotes,risk}.p
     stored as a short-lived `telegram_trade_intents` row. That size creates a
     proposal, and a Confirm tap submits it through the same
     `broker.confirm_proposal` path (owner-scoped, risk twice, idempotent,
-    expiring). Alerts whose impacted names are outside the NSE universe still
-    get a paginated **Browse paper stocks** fallback (and unlinked chats get a
-    Connect button), so an alert never ships without a trade affordance. Refuse
-    group chats and keep `PAPER_TELEGRAM_ENABLED` as a second kill switch.
+    expiring). Alerts whose impacted names are outside the NSE universe inline the
+    first paper-universe Buy/Sell page (More pages the rest), and unlinked chats
+    get a Connect button, so an alert never ships without a trade affordance.
+    Refuse group chats and keep `PAPER_TELEGRAM_ENABLED` as a second kill switch.
 
 Trading API (all under `/api/trading`; auth required except `/config` and
 `/instruments`): `config`, `instruments`, `quote/{symbol}`, `account`,

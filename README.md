@@ -227,10 +227,12 @@ book, and P&L percentage. The same totals are available from
 impact alerts for symbols in the paper universe. Tap Buy or Sell, reply with a
 share quantity (e.g. `10`) or a rupee amount (e.g. `₹25000`), review the sized
 proposal, then confirm. Sizes are the only thing typed; the symbol and side come
-from the server-issued buttons. Every alert also carries **Browse paper stocks**
-(paginated Buy/Sell for the 22-symbol universe) so a global-ticker alert with no
-NSE mapping still has a trade path; unlinked chats get a **Connect paper trading**
-button. Linking is a one-time handshake:
+from the server-issued buttons. Alerts with impacted NSE names show those
+Buy/Sell rows directly; an alert whose impacted names are outside the paper
+universe inlines the first paper-universe page (Buy/Sell for liquid names) with
+**More** paging through all 22, so no alert arrives without trade buttons.
+Unlinked chats get a **Connect paper trading** button. Linking is a one-time
+handshake:
 
 1. On `/trading`, open **Trade from Telegram** and generate a link code.
 2. Send `/link CODE` to [@sunrisescraperbot](https://t.me/sunrisescraperbot) from
