@@ -29,6 +29,14 @@ def test_no_alert_when_failures_outside_window() -> None:
                              cooldown_seconds=1800, last_alert_at=0.0)
 
 
+def test_first_alert_not_blocked_on_fresh_clock() -> None:
+    # On a freshly booted host monotonic() can be smaller than the cooldown.
+    for t in (1.0, 2.0):
+        ops_alerts._failures.append(t)
+    assert _should_alert(now=3.0, threshold=2, window_seconds=600,
+                         cooldown_seconds=1800, last_alert_at=None)
+
+
 def test_cooldown_blocks_second_alert() -> None:
     for t in (1990, 1992, 1994, 1996, 1998):
         ops_alerts._failures.append(t)

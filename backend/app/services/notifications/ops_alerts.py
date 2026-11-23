@@ -16,7 +16,7 @@ log = get_logger("ops.alerts")
 
 # module-level state (single process: scheduler / worker / maintenance)
 _failures: deque[float] = deque()
-_last_alert_at: float = 0.0
+_last_alert_at: float | None = None
 _source_last_alert: dict[str, float] = {}
 
 
@@ -25,12 +25,18 @@ def _should_alert(
     threshold: int,
     window_seconds: float,
     cooldown_seconds: float,
-    last_alert_at: float,
+    last_alert_at: float | None,
 ) -> bool:
     """Pure decision helper (unit-testable): did we cross the spike threshold,
-    and are we outside the cooldown?"""
+    and are we outside the cooldown?
+
+    `last_alert_at=None` means no alert has been sent yet. Using 0.0 as the
+    sentinel breaks on a freshly booted host, where time.monotonic() is smaller
+    than the cooldown and the first real alert would be suppressed.
+    """
     recent = sum(1 for t in _failures if now - t <= window_seconds)
-    return recent >= threshold and (now - last_alert_at) >= cooldown_seconds
+    cooldown_ok = last_alert_at is None or (now - last_alert_at) >= cooldown_seconds
+    return recent >= threshold and cooldown_ok
 
 
 async def record_analysis_failure(component: str, error: str) -> bool:
@@ -79,7 +85,8 @@ async def record_source_failure(slug: str, error_type: str, detail: str) -> bool
     """Alert once per cooldown when a single source keeps failing."""
     s = get_settings()
     now = time.monotonic()
-    if now - _source_last_alert.get(slug, 0.0) < s.ops_alert_cooldown_minutes * 60:
+    last_source_alert = _source_last_alert.get(slug)
+    if last_source_alert is not None and now - last_source_alert < s.ops_alert_cooldown_minutes * 60:
         return False
     _source_last_alert[slug] = now
 
@@ -106,5 +113,5 @@ def reset_state() -> None:
     """Test helper."""
     global _last_alert_at
     _failures.clear()
-    _last_alert_at = 0.0
+    _last_alert_at = None
     _source_last_alert.clear()
