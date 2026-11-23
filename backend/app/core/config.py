@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     cognito_region: str = "us-east-1"
     cognito_user_pool_id: str = ""
     cognito_app_client_id: str = ""
+    cognito_domain: str = ""  # managed-login domain for the userInfo fallback
     trading_enabled: bool = False
 
     telegram_bot_token: str = ""

@@ -2,6 +2,8 @@
 
 import secrets
 from functools import lru_cache
+
+import httpx
 from typing import Any
 
 import jwt
@@ -49,6 +51,24 @@ def verify_cognito_access_token(token: str) -> dict[str, Any]:
     return claims
 
 
+async def _cognito_userinfo_email(settings, access_token: str) -> str | None:
+    """Fetch the email claim when the access token does not carry it."""
+    if not settings.cognito_domain:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"https://{settings.cognito_domain}/oauth2/userInfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        if resp.status_code != 200:
+            return None
+        email = str(resp.json().get("email") or "").strip().lower()
+        return email or None
+    except Exception:
+        return None
+
+
 async def require_authenticated_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict[str, Any]:
@@ -90,6 +110,8 @@ async def require_admin(
                 raise
         if claims:
             email = str(claims.get("email") or "").strip().lower()
+            if not email:
+                email = await _cognito_userinfo_email(settings, credentials.credentials) or ""
             if email and email in allowed:
                 return
 

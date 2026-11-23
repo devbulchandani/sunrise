@@ -36,6 +36,7 @@ services:
       COGNITO_REGION: us-east-1
       COGNITO_USER_POOL_ID: us-east-1_V7pzjzvij
       COGNITO_APP_CLIENT_ID: 6l372ppaohfv233ojmgkhqf2k6
+      COGNITO_DOMAIN: sunrise-trading-v7pzjzvij.auth.us-east-1.amazoncognito.com
       TRADING_ENABLED: "false"
     volumes:
       - ./.brightdata:/root/.config/brightdata-cli:ro

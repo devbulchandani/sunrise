@@ -141,7 +141,7 @@ See `.env.example`. Key ones:
 | `LLM_MODEL` / `LLM_BASE_URL` | Model and endpoint for OpenAI-compatible providers. The example uses Gemini 3.1 Flash-Lite. Bedrock Mantle uses `openai.gpt-oss-20b` and `https://bedrock-mantle.us-east-1.api.aws/v1` |
 | `LLM_API_KEY` | Provider key. For Bedrock Mantle, use the Bedrock bearer API key; it is sent as an `Authorization: Bearer` token |
 | `LLM_BEDROCK_REGION` | Bedrock selected Region; defaults to `us-east-1` |
-| `COGNITO_REGION` / `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` | Optional Cognito access-token verification settings for future authenticated account APIs |
+| `COGNITO_REGION` / `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` / `COGNITO_DOMAIN` | Cognito access-token verification and the userInfo fallback used to resolve the admin email |
 | `TRADING_ENABLED` | Trading authorization is fail-closed (`false` by default); no order routes are enabled yet |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
@@ -299,7 +299,7 @@ python -m app.services.notifications.bot_subscribers
 ## Running tests
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest tests -q    # 55 tests
+cd backend && ./.venv/bin/python -m pytest tests -q    # 57 tests
 ```
 
 Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomaly detection, dedup fingerprints, candidate safety checks, accept/reject validation paths, urgency blending bounds, Telegram formatting (incl. no-prediction language), clustering similarity, and API round-trips on an isolated SQLite DB.
