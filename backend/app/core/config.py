@@ -37,24 +37,62 @@ class Settings(BaseSettings):
 
     demo_mode: bool = False
     admin_token: str = ""
+    # Comma-separated Cognito emails allowed to use admin/debug endpoints.
+    # The frontend never receives an admin secret; it authenticates with the
+    # user's Cognito access token instead.
+    admin_emails: str = ""
+
+    # Browser origins allowed to call the API directly (the Worker strips
+    # Origin, so this only affects direct access).
+    cors_origins: str = (
+        "https://sunrise-dashboard.pages.dev,"
+        "http://localhost:5173,http://127.0.0.1:5173"
+    )
 
     # scraping behaviour
     request_timeout: float = 25.0
     min_request_interval_seconds: float = 3.0
     snapshot_retention_per_source: int = 5
     article_retention_days: int = 30
+    source_lock_seconds: int = 900
 
     # run live market-context research for events at/above this urgency
     market_research_min_urgency: int = 50
 
+    # clustering
+    clustering_candidate_limit: int = 500
+    clustering_similarity_threshold: float = 66.0
+    clustering_jaccard_floor: float = 0.3
+
+    # notification floors (anti-spam)
+    telegram_min_urgency: int = 61
+    email_min_urgency: int = 41
+
     # healing thresholds
     heal_after_consecutive_failures: int = 2
     min_healing_score: float = 70.0
+    healing_stale_minutes: int = 30
+
+    # analysis retries
+    analysis_max_attempts: int = 5
 
     # ops alerting: Telegram the owner when pipeline failures spike
     ops_alert_failure_threshold: int = 5
     ops_alert_window_minutes: int = 10
     ops_alert_cooldown_minutes: int = 30
+    ops_source_failure_threshold: int = 5
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {
+            email.strip().lower()
+            for email in self.admin_emails.split(",")
+            if email.strip()
+        }
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

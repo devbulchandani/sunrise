@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import httpx
 from dateutil import parser as date_parser
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -29,8 +29,19 @@ from app.services.scraping.extractor import extract_articles, extract_rss_entrie
 from app.services.deduplication.dedup import content_fingerprint, normalize_url
 from app.services.scraping.fetcher import classify_http_error, fetch
 from app.services.scraping.health import compute_metrics, detect_anomalies
+from app.services.scraping.lock import acquire_source_lock, release_source_lock
 
 log = get_logger("scraper.run")
+
+
+async def _maybe_alert_source_failure(source: Source, error_type: str | None, detail: str | None) -> None:
+    """Alert the owner once a source has failed repeatedly (rate-limited)."""
+    settings = get_settings()
+    if (source.consecutive_failures or 0) < settings.ops_source_failure_threshold:
+        return
+    from app.services.notifications.ops_alerts import record_source_failure
+
+    await record_source_failure(source.slug, error_type or "UNKNOWN", detail or "")
 
 
 class ScrapeOutcome:
@@ -41,6 +52,7 @@ class ScrapeOutcome:
         self.error_type = None
         self.error_message = None
         self.should_heal = False
+        self.skipped = False
 
 
 async def _save_snapshot(session: AsyncSession, source: Source, url: str, html: str) -> None:
@@ -130,7 +142,29 @@ async def _persist_articles(session: AsyncSession, source: Source, entries: list
     return len(new_rows), round(dupes / total, 3)
 
 
-async def run_source(session: AsyncSession, source: Source, http_client: httpx.AsyncClient | None = None) -> ScrapeOutcome:
+async def run_source(
+    session: AsyncSession,
+    source: Source,
+    http_client: httpx.AsyncClient | None = None,
+) -> ScrapeOutcome:
+    """Execute one scrape under a per-source distributed lock."""
+    lock_token = await acquire_source_lock(source.id)
+    if lock_token is None:
+        log.info("scraper.skipped_locked", source=source.slug)
+        outcome = ScrapeOutcome()
+        outcome.skipped = True
+        return outcome
+    try:
+        return await _run_source(session, source, http_client)
+    finally:
+        await release_source_lock(source.id, lock_token)
+
+
+async def _run_source(
+    session: AsyncSession,
+    source: Source,
+    http_client: httpx.AsyncClient | None = None,
+) -> ScrapeOutcome:
     """Execute one scrape of a source with full health accounting."""
     outcome = ScrapeOutcome()
     run = ScrapingRun(source_id=source.id, started_at=utcnow())
@@ -223,7 +257,7 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
             outcome.should_heal = (
                 verdict.error_type in ("EMPTY_RESULT", "STRUCTURE_CHANGE", "PARSING_FAILURE")
                 and consecutive >= settings.heal_after_consecutive_failures
-            ) or (verdict.degraded is False and verdict.error_type == "STRUCTURE_CHANGE" and consecutive >= 1 and metrics.articles_found == 0)
+            )
             log.warn(
                 "scraper.failure",
                 source=source.slug,
@@ -231,6 +265,7 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
                 detail=outcome.error_message,
                 consecutive=consecutive,
             )
+            await _maybe_alert_source_failure(source, outcome.error_type, outcome.error_message)
         else:
             outcome.status = RunStatus.SUCCESS.value
             outcome.articles_found = metrics.articles_found
@@ -250,18 +285,21 @@ async def run_source(session: AsyncSession, source: Source, http_client: httpx.A
     except FetchHttpError as exc:
         outcome.error_type = exc.error_type
         outcome.error_message = exc.message
-        source.consecutive_failures += 1
+        source.consecutive_failures = (source.consecutive_failures or 0) + 1
         log.warn("scraper.failure", source=source.slug, error_type=exc.error_type, detail=exc.message)
+        await _maybe_alert_source_failure(source, exc.error_type, exc.message)
     except PermissionError as exc:
         outcome.error_type = "NETWORK_FAILURE"
         outcome.error_message = str(exc)
-        source.consecutive_failures += 1
+        source.consecutive_failures = (source.consecutive_failures or 0) + 1
         log.warn("scraper.failure", source=source.slug, error_type="ROBOTS_DISALLOWED")
+        await _maybe_alert_source_failure(source, "ROBOTS_DISALLOWED", str(exc))
     except Exception as exc:  # parsing errors, unexpected bugs
         outcome.error_type = "PARSING_FAILURE"
         outcome.error_message = f"{type(exc).__name__}: {exc}"[:1000]
-        source.consecutive_failures += 1
+        source.consecutive_failures = (source.consecutive_failures or 0) + 1
         log.warn("scraper.failure", source=source.slug, error_type=outcome.error_type, detail=str(exc)[:300])
+        await _maybe_alert_source_failure(source, outcome.error_type, outcome.error_message)
     finally:
         if own_client:
             await client.aclose()

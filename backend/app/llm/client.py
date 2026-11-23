@@ -135,12 +135,25 @@ class LLMClient:
             # budget for the actual answer instead of burning it on chain-of-thought
             system = "/no_think\n" + system
         if self.settings.llm_provider == "anthropic":
-            return await self._complete_anthropic(system, user, max_tokens)
-        if self.settings.llm_provider == "bedrock":
-            return await asyncio.to_thread(
+            text = await self._complete_anthropic(system, user, max_tokens)
+        elif self.settings.llm_provider == "bedrock":
+            text = await asyncio.to_thread(
                 self._complete_bedrock_sync, system, user, max_tokens
             )
-        return await self._complete_openai(system, user, max_tokens)
+        else:
+            text = await self._complete_openai(system, user, max_tokens)
+        await self._record_call()
+        return text
+
+    async def _record_call(self) -> None:
+        """Durable usage counter for the System dashboard (never fatal)."""
+        try:
+            from app.services.metrics import increment_counter
+
+            await increment_counter("llm_calls")
+        except Exception:  # pragma: no cover - metrics must never break inference
+            pass
+
 
     def _complete_bedrock_sync(self, system: str, user: str, max_tokens: int) -> str:
         """Invoke Amazon Nova Micro through Bedrock Converse using the instance role."""
@@ -191,7 +204,6 @@ class LLMClient:
             # chain-of-thought so the budget goes to the actual answer
             payload["chat_template_kwargs"] = {"thinking": False}
         headers = {"Authorization": f"Bearer {self.settings.llm_api_key}"}
-        import asyncio as _asyncio
 
         last_error = "unknown"
         for attempt in range(3):
@@ -221,7 +233,7 @@ class LLMClient:
                     status=resp.status_code,
                     retry_in=wait,
                 )
-                await _asyncio.sleep(wait)
+                await asyncio.sleep(wait)
                 continue
             break
         raise LLMError(last_error)

@@ -143,12 +143,11 @@ SEED_SOURCES = [
 
 
 async def seed() -> None:
-    # create tables
-    from app.models.models import Base
+    # create tables + apply additive upgrades
+    from app.db.upgrade import ensure_schema
 
     engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await ensure_schema(engine)
 
     factory = get_session_factory()
     async with factory() as session:

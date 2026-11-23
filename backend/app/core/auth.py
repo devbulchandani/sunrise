@@ -1,10 +1,11 @@
-"""Cognito access-token verification and fail-closed trading authorization."""
+"""Cognito access-token verification and fail-closed authorization."""
 
+import secrets
 from functools import lru_cache
 from typing import Any
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError, PyJWKClient
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError
@@ -54,6 +55,51 @@ async def require_authenticated_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="bearer token required")
     return verify_cognito_access_token(credentials.credentials)
+
+
+async def require_admin(
+    x_admin_token: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> None:
+    """Gate operational endpoints.
+
+    Two independent paths are accepted:
+      1. X-Admin-Token for CLI/ops use (compared in constant time).
+      2. A Cognito access token whose verified email is in ADMIN_EMAILS, so the
+         dashboard can trigger runs without a secret baked into the bundle.
+
+    With neither ADMIN_TOKEN nor ADMIN_EMAILS configured (local development),
+    admin endpoints stay open so the demo still works out of the box.
+    """
+    settings = get_settings()
+
+    if settings.admin_token and x_admin_token:
+        if secrets.compare_digest(x_admin_token, settings.admin_token):
+            return
+
+    allowed = settings.admin_email_set
+    if allowed and credentials is not None and credentials.scheme.lower() == "bearer":
+        try:
+            claims = verify_cognito_access_token(credentials.credentials)
+        except HTTPException as exc:
+            # An invalid token is an authentication failure; a missing Cognito
+            # configuration simply means this path is unavailable.
+            if exc.status_code == 503:
+                claims = None
+            else:
+                raise
+        if claims:
+            email = str(claims.get("email") or "").strip().lower()
+            if email and email in allowed:
+                return
+
+    if not settings.admin_token and not allowed:
+        return  # development: no admin credentials configured
+
+    raise HTTPException(
+        status_code=403,
+        detail="admin authorization required — sign in with an allowlisted account or use X-Admin-Token",
+    )
 
 
 async def require_trading_user(

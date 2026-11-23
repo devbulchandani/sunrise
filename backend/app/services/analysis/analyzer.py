@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.services.analysis.tools import tools_available
 from app.core.redis import publish, get_redis, CHANNELS
-from app.llm.client import LLMError, get_llm
+from app.llm.client import get_llm
 from app.llm.schemas import MarketAnalysis
 from app.models.models import Article, EventAsset, MarketEvent, Source, utcnow
 from app.services.analysis.clustering import attach_article
@@ -87,6 +87,10 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
     llm = get_llm()
     if not llm.configured:
         log.warn("analysis.skipped_no_llm", event=event.id)
+        event.analysis_attempts = (event.analysis_attempts or 0) + 1
+        if event.analysis_attempts >= settings.analysis_max_attempts:
+            event.analysis_status = "FAILED"
+        await session.commit()
         return event
 
     try:
@@ -104,7 +108,14 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
         from app.services.notifications.ops_alerts import record_analysis_failure
 
         await record_analysis_failure("LLM analysis", str(exc))
-        event.analysis_status = "PENDING"  # retry later
+        event.analysis_attempts = (event.analysis_attempts or 0) + 1
+        # Stop retrying after a bounded number of attempts so a permanently
+        # broken provider/key cannot spin the worker forever.
+        event.analysis_status = (
+            "FAILED"
+            if event.analysis_attempts >= settings.analysis_max_attempts
+            else "PENDING"
+        )
         await session.commit()
         return event
 
@@ -156,7 +167,7 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
                         market_impact=analysis.market_impact,
                     )
                     log.info("analysis.refined_with_context", event=event.id, results=len(context["results"]))
-                except (LLMError, Exception) as exc:
+                except Exception as exc:
                     # keep first-pass analysis; context is still valuable
                     log.warn("analysis.refine_skipped", event=event.id, error=str(exc)[:150])
         except Exception as exc:
@@ -188,6 +199,7 @@ async def analyze_event(session: AsyncSession, event_id: int) -> MarketEvent | N
     event.market_context = market_context
     event.urgency = urgency
     event.analysis_status = "DONE"
+    event.analysis_attempts = 0
     event.last_updated_at = utcnow()
 
     # replace assets

@@ -4,19 +4,17 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
-import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, distinct
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.auth import require_admin, require_authenticated_user
 from app.core.config import get_settings
-from app.core.auth import require_authenticated_user
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import get_db
-from app.llm.client import LLMError, get_llm
 from app.models.models import (
     Article,
     RawSnapshot,
@@ -32,35 +30,35 @@ from app.models.models import (
     UserPreference,
 )
 from app.schemas.schemas import (
-    EventDetail,
     EventListItem,
     HealingEventOut,
     PreferencesIn,
     PreferencesOut,
     RunOut,
-    ScraperHealth,
     SourceOut,
-    StatsOut,
     StrategyOut,
 )
-from app.services.healing.agent import heal_source
-from app.services.scraping.health import compute_metrics  # noqa: F401
+from app.services.metrics import read_counter
 
 log = get_logger("api")
 router = APIRouter(prefix="/api")
+
+# Redis pub/sub channel -> SSE event name. Keep this explicit: deriving the
+# name from the channel produced "events"/"scrapers", which the dashboard did
+# not listen for.
+SSE_EVENT_NAMES = {
+    "sunrise:events:new": "new",
+    "sunrise:alerts:critical": "alerts",
+    "sunrise:scrapers:failure": "scraper_failure",
+    "sunrise:scrapers:healed": "healed",
+}
+
 
 
 @router.get("/auth/me")
 async def current_user(claims: dict = Depends(require_authenticated_user)):
     """Return the authenticated Cognito identity without exposing token contents."""
     return {"sub": claims["sub"], "email": claims.get("email")}
-
-
-def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
-    """Gate debug/admin endpoints when ADMIN_TOKEN is set."""
-    settings = get_settings()
-    if settings.admin_token and x_admin_token != settings.admin_token:
-        raise HTTPException(status_code=403, detail="admin token required")
 
 
 # ---------------------------------------------------------------- health
@@ -358,46 +356,70 @@ async def healing_history(source_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
-_manual_trigger_locks: set[int] = set()
+async def _enqueue_job(job_name: str, *args) -> None:
+    """Enqueue a job on the arq queue used by the worker."""
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    settings = get_settings()
+    pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        await pool.enqueue_job(job_name, *args)
+    finally:
+        await pool.aclose()
 
 
 @router.post("/scrapers/{source_id}/run")
-async def trigger_scrape(source_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin)):
-    if source_id in _manual_trigger_locks:
-        raise HTTPException(status_code=429, detail="a run is already in progress")
+async def trigger_scrape(
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
     source = (await db.execute(select(Source).where(Source.id == source_id))).scalar_one_or_none()
     if source is None:
         raise HTTPException(status_code=404, detail="source not found")
-    _manual_trigger_locks.add(source_id)
-    try:
-        # enqueue on the real arq queue so clustering/analysis chain normally
-        from arq import create_pool
-        from arq.connections import RedisSettings
-
-        settings = get_settings()
-        pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-        try:
-            await pool.enqueue_job("scrape_source", source_id)
-        finally:
-            await pool.aclose()
-        return {"triggered": True, "queued": "scrape_source", "source": source.slug}
-    finally:
-        _manual_trigger_locks.discard(source_id)
+    await _enqueue_job("scrape_source", source_id)
+    return {
+        "triggered": True,
+        "queued": "scrape_source",
+        "source": source.slug,
+        "source_id": source.id,
+        "status": "QUEUED",
+    }
 
 
 @router.post("/scrapers/{source_id}/heal")
-async def trigger_heal(source_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin)):
+async def trigger_heal(
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
     source = (await db.execute(select(Source).where(Source.id == source_id))).scalar_one_or_none()
     if source is None:
         raise HTTPException(status_code=404, detail="source not found")
-    healing_event = await heal_source(db, source_id, manual=True)
+
+    active = (
+        await db.execute(
+            select(HealingEvent.id).where(
+                HealingEvent.source_id == source_id,
+                HealingEvent.status.in_(["PENDING", "RUNNING"]),
+            )
+        )
+    ).first()
+    if active is not None:
+        raise HTTPException(status_code=409, detail="healing is already running for this source")
+
+    # Healing can take minutes (up to 3 LLM candidates), so run it on the
+    # worker instead of holding an HTTP request open behind the proxy.
+    await _enqueue_job("heal_source_job", source_id, True)
     return {
         "triggered": True,
-        "status": healing_event.status,
-        "validation_score": healing_event.validation_score,
-        "new_version": healing_event.new_strategy_version,
-        "timeline": healing_event.timeline,
+        "queued": "heal_source_job",
+        "status": "RUNNING",
+        "source": source.slug,
+        "source_id": source.id,
     }
+
 
 
 @router.post("/scrapers/{source_id}/test-strategy")
@@ -464,8 +486,10 @@ async def stats(db: AsyncSession = Depends(get_db)):
     alerts_sent = await count(Notification, Notification.status == "SENT")
     failures = await count(ScrapingRun, ScrapingRun.error_type.isnot(None))
     healings = await count(HealingEvent, HealingEvent.status == "SUCCESS")
-    llm_calls = await count(HealingEvent) + events_count  # approximation of LLM usage
-    jobs_processed = (await count(ScrapingRun)) + events_count + healings
+    scraping_runs = await count(ScrapingRun)
+    healing_attempts = await count(HealingEvent)
+    llm_calls = await read_counter("llm_calls")
+    jobs_processed = scraping_runs + healing_attempts
 
     return {
         "jobs_processed": jobs_processed,
@@ -552,19 +576,16 @@ async def _get_or_create_demo_user(db: AsyncSession) -> PreferencesOut:
 
 
 @router.get("/stream")
-async def stream(request_headers: dict | None = None):
+async def stream():
     """Server-Sent Events stream fed by Redis pub/sub."""
     settings = get_settings()
 
     async def event_generator():
         redis = get_redis(settings.redis_url)
         pubsub = redis.pubsub()
-        await pubsub.subscribe(*[
-            "sunrise:events:new",
-            "sunrise:alerts:critical",
-            "sunrise:scrapers:failure",
-            "sunrise:scrapers:healed",
-        ])
+        await pubsub.subscribe(*SSE_EVENT_NAMES.keys())
+        # Tell EventSource how long to wait before reconnecting.
+        yield "retry: 5000\n\n"
         yield f"data: {json.dumps({'type': 'connected'})}\n\n"
         try:
             while True:
@@ -573,7 +594,7 @@ async def stream(request_headers: dict | None = None):
                     yield ": keepalive\n\n"
                     continue
                 channel = message.get("channel", "")
-                kind = channel.split(":")[-2] if ":" in channel else channel
+                kind = SSE_EVENT_NAMES.get(channel, "message")
                 data = message.get("data", "{}")
                 try:
                     payload = json.loads(data)

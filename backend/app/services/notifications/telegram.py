@@ -46,12 +46,6 @@ def format_event_message(event: dict) -> str:
     markets = event.get("markets") or []
     if markets:
         lines.append("Markets potentially affected:")
-        lines.append("  " + " · ".join(markets[:6]))
-        lines.append("")
-
-    markets = event.get("markets") or []
-    if markets:
-        lines.append("Markets potentially affected:")
         lines.append("  " + " · ".join(str(m) for m in markets[:6]))
         lines.append("")
 

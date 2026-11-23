@@ -7,14 +7,14 @@ import asyncio
 
 from sqlalchemy import select, text
 
-from app.core.logging import setup_logging
+from app.core.logging import get_logger, setup_logging
 from app.db.session import get_session_factory
 from app.models.models import Article, MarketEvent
-from app.services.analysis.analyzer import analyze_event
 from app.services.analysis.clustering import find_or_create_event
-from app.services.notifications.dispatcher import dispatch_event_notifications
+from app.services.pipeline import finalize_event
 
 setup_logging()
+log = get_logger("maintenance")
 
 
 async def main() -> None:
@@ -45,17 +45,16 @@ async def main() -> None:
             )
         ).scalars().all()
     print(f"[maintenance] analyzing {len(pending)} pending events")
-    sent_total = 0
+    done = 0
     for eid in pending:
         async with factory() as session:
             try:
-                ev = await analyze_event(session, eid)
+                ev = await finalize_event(session, eid)
                 if ev and ev.analysis_status == "DONE":
-                    n = await dispatch_event_notifications(session, eid)
-                    sent_total += n
+                    done += 1
             except Exception as exc:
-                print(f"  event {eid} failed: {type(exc).__name__}: {str(exc)[:120]}")
-    print(f"[maintenance] done; notifications sent: {sent_total}")
+                log.warn("maintenance.event_failed", event=eid, error=str(exc)[:150])
+    print(f"[maintenance] done; events completed: {done}")
 
 
 if __name__ == "__main__":

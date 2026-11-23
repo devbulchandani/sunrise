@@ -17,6 +17,7 @@ log = get_logger("ops.alerts")
 # module-level state (single process: scheduler / worker / maintenance)
 _failures: deque[float] = deque()
 _last_alert_at: float = 0.0
+_source_last_alert: dict[str, float] = {}
 
 
 def _should_alert(
@@ -74,8 +75,36 @@ async def record_analysis_failure(component: str, error: str) -> bool:
         return False
 
 
+async def record_source_failure(slug: str, error_type: str, detail: str) -> bool:
+    """Alert once per cooldown when a single source keeps failing."""
+    s = get_settings()
+    now = time.monotonic()
+    if now - _source_last_alert.get(slug, 0.0) < s.ops_alert_cooldown_minutes * 60:
+        return False
+    _source_last_alert[slug] = now
+
+    msg = (
+        f"⚠️ Sunrise source degraded: {slug}\n\n"
+        f"{s.ops_source_failure_threshold}+ consecutive failures "
+        f"({error_type}).\nLast error: {detail[:300]}\n\n"
+        f"Check Scraper Health for the strategy version and run history."
+    )
+    log.warn("ops.source_alert_sent", source=slug, error_type=error_type)
+    try:
+        from app.services.notifications.telegram import send_telegram
+
+        ok, info = await send_telegram(msg)
+        if not ok:
+            log.error("ops.source_alert_delivery_failed", detail=info[:150])
+        return ok
+    except Exception as exc:  # never let alerting break the pipeline
+        log.error("ops.source_alert_error", error=str(exc)[:150])
+        return False
+
+
 def reset_state() -> None:
     """Test helper."""
     global _last_alert_at
     _failures.clear()
     _last_alert_at = 0.0
+    _source_last_alert.clear()

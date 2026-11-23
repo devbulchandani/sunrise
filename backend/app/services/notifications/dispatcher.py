@@ -21,9 +21,6 @@ from app.services.notifications.telegram import format_event_message, send_teleg
 
 log = get_logger("notify.dispatch")
 
-# minimum urgency levels that each channel sends at all (anti-spam floor)
-CHANNEL_FLOORS = {"telegram": 61, "email": 41}
-
 
 def user_wants(user_pref: UserPreference | None, event: MarketEvent, assets: list[str]) -> bool:
     """Filter an event against one user's preferences."""
@@ -174,7 +171,7 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
 
     # owner's default chat from env — always receives critical+ events,
     # skipped if the owner also subscribed via the bot (would double-send)
-    if telegram_configured() and event.urgency >= CHANNEL_FLOORS["telegram"]:
+    if telegram_configured() and event.urgency >= settings.telegram_min_urgency:
         owner_is_subscriber = any(
             u.telegram_chat_id == settings.telegram_chat_id for u in users
         )
@@ -193,8 +190,6 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
 
 
 def build_event_message_context(event: MarketEvent, assets) -> dict:
-    from sqlalchemy import select as _select
-
     return {
         "event_id": event.id,
         "level": urgency_level(event.urgency),

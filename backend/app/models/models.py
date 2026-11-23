@@ -171,7 +171,10 @@ class HealingEvent(Base):
 
 class Article(Base):
     __tablename__ = "articles"
-    __table_args__ = (Index("ix_articles_content_hash", "content_hash"),)
+    __table_args__ = (
+        Index("ix_articles_content_hash", "content_hash"),
+        UniqueConstraint("source_id", "url", name="uq_articles_source_url"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"))
@@ -206,6 +209,7 @@ class MarketEvent(Base):
     ipo_research: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # agentic IPO deep-dive
     market_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # live research context
     analysis_status: Mapped[str] = mapped_column(String(16), default="PENDING")  # PENDING|DONE|FAILED
+    analysis_attempts: Mapped[int] = mapped_column(Integer, default=0)
     first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -252,3 +256,15 @@ class Notification(Base):
     status: Mapped[str] = mapped_column(String(16), default="QUEUED")  # QUEUED|SENT|SKIPPED|FAILED
     error: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ---------------------------------------------------------------- metrics
+
+
+class MetricCounter(Base):
+    """Durable counters for metrics that cannot be derived from row counts."""
+
+    __tablename__ = "metric_counters"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, default=0)

@@ -17,9 +17,8 @@ Run inside the scheduler process so exactly one instance polls.
 """
 
 import asyncio
-import json
-from datetime import datetime, timezone
-
+import os
+import tempfile
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,13 +47,7 @@ HELP_TEXT = (
 
 
 def _offset_file() -> str:
-    import tempfile
-
-    return os_path_join(tempfile.gettempdir(), "sunrise-tg-offset")
-
-
-def os_path_join(a: str, b: str) -> str:
-    return f"{a}/{b}"
+    return os.path.join(tempfile.gettempdir(), "sunrise-tg-offset")
 
 
 def _load_offset() -> int:
@@ -174,11 +167,12 @@ async def handle_update(session: AsyncSession, update: dict) -> None:
 
     await session.commit()
 
-    await _tg_call(
-        httpx.AsyncClient(),
-        "sendMessage",
-        {"chat_id": chat_id, "text": reply},
-    )
+    async with httpx.AsyncClient(timeout=20) as client:
+        await _tg_call(
+            client,
+            "sendMessage",
+            {"chat_id": chat_id, "text": reply},
+        )
     log.info("bot.command", chat=chat_id, command=command)
 
 

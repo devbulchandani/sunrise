@@ -104,6 +104,21 @@ async def heal_source(session: AsyncSession, source_id: int, manual: bool = Fals
     if source is None:
         raise ValueError(f"source {source_id} not found")
 
+    active = (
+        await session.execute(
+            select(HealingEvent)
+            .where(
+                HealingEvent.source_id == source.id,
+                HealingEvent.status.in_(["PENDING", "RUNNING"]),
+            )
+            .order_by(HealingEvent.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if active is not None:
+        log.info("healing.already_running", source=source.slug, healing_id=active.id)
+        return active
+
     healing_event = HealingEvent(
         source_id=source.id,
         status="RUNNING",
@@ -273,7 +288,6 @@ async def _run_healing(session: AsyncSession, source: Source, healing_event: Hea
         feedback = "; ".join(validation.reasons)
 
     healing_event.status = "REJECTED"
-    healing_event.timeline = [*(healing_event.timeline or []), *[]]
     _append_step(healing_event, "healing.rejected", f"all {MAX_CANDIDATES} candidates rejected")
     source.health_status = "FAILED"
     await session.commit()
