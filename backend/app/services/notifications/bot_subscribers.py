@@ -23,8 +23,7 @@ Run inside the scheduler process so exactly one instance polls.
 """
 
 import asyncio
-import os
-import tempfile
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import get_session_factory
-from app.models.models import User, UserPreference
+from app.models.models import MetricCounter, User, UserPreference
 from app.services.trading import telegram_trade
 
 log = get_logger("notify.bot")
@@ -58,24 +57,23 @@ HELP_TEXT = (
 )
 
 
-def _offset_file() -> str:
-    return os.path.join(tempfile.gettempdir(), "sunrise-tg-offset")
+# Update offsets live in Postgres, not /tmp: a container restart must not
+# replay yesterday's commands (or trade callbacks) to subscribers.
+OFFSET_KEY = "telegram_update_offset"
 
 
-def _load_offset() -> int:
-    try:
-        with open(_offset_file()) as f:
-            return int(f.read().strip() or 0)
-    except (OSError, ValueError):
-        return 0
+async def _load_offset(session: AsyncSession) -> int:
+    row = await session.get(MetricCounter, OFFSET_KEY)
+    return int(row.value) if row is not None else 0
 
 
-def _save_offset(offset: int) -> None:
-    try:
-        with open(_offset_file(), "w") as f:
-            f.write(str(offset))
-    except OSError:
-        pass
+async def _save_offset(session: AsyncSession, offset: int) -> None:
+    row = await session.get(MetricCounter, OFFSET_KEY)
+    if row is None:
+        session.add(MetricCounter(name=OFFSET_KEY, value=offset))
+    else:
+        row.value = offset
+    await session.commit()
 
 
 async def _tg_call(client: httpx.AsyncClient, method: str, payload: dict | None = None) -> dict | None:
@@ -84,12 +82,16 @@ async def _tg_call(client: httpx.AsyncClient, method: str, payload: dict | None 
         resp = await client.post(
             f"{API}/bot{settings.telegram_bot_token}/{method}",
             json=payload or {},
-            timeout=40,
+            timeout=60,
         )
         data = resp.json()
         return data if data.get("ok") else None
     except Exception as exc:
-        log.warn("bot.api_error", method=method, error=str(exc)[:150])
+        log.warn(
+            "bot.api_error",
+            method=method,
+            error=f"{type(exc).__name__}: {exc}"[:150],
+        )
         return None
 
 
@@ -310,21 +312,24 @@ async def poll_forever() -> None:
 
     await register_command_menu()
 
-    offset = _load_offset()
-    log.info("bot.started")
+    factory = get_session_factory()
+    async with factory() as session:
+        offset = await _load_offset(session)
+    log.info("bot.started", offset=offset)
     async with httpx.AsyncClient(timeout=45) as client:
         while True:
             result = await _tg_call(
-                client, "getUpdates", {"timeout": 30, "offset": offset}
+                client, "getUpdates", {"timeout": 25, "offset": offset}
             )
             if not result:
                 await asyncio.sleep(5)
                 continue
             for update in result.get("result", []):
                 offset = update["update_id"] + 1
-                _save_offset(offset)
-                factory = get_session_factory()
                 async with factory() as session:
+                    # Persist the offset before handling so a bad update cannot
+                    # wedge the poller, and a restart cannot replay it.
+                    await _save_offset(session, offset)
                     try:
                         await handle_update(session, update)
                     except Exception as exc:
