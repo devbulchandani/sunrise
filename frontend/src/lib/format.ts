@@ -40,8 +40,9 @@ export function urgencyTier(urgency: number | null | undefined): UrgencyTier {
   const u = urgency ?? 0;
   if (u >= 81) return "CRITICAL";
   if (u >= 61) return "HIGH";
-  if (u >= 41) return "MODERATE";
-  return "RELEVANT";
+  if (u >= 41) return "RELEVANT";
+  if (u >= 21) return "MODERATE";
+  return "LOW";
 }
 
 export function sentimentLabel(s: string | null | undefined): Sentiment {

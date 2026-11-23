@@ -51,6 +51,20 @@ function ScraperCard({
   const [articles, setArticles] = useState<ScraperArticle[] | null>(null);
   const [showArticles, setShowArticles] = useState(false);
 
+  useEffect(() => {
+    if (!showArticles) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowArticles(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showArticles]);
+
   const openArticles = async () => {
     setShowArticles(true);
     if (articles === null) {
@@ -68,13 +82,14 @@ function ScraperCard({
       const out = await runScraper(scraper.source_id);
       setAction({
         busy: null,
-        message:
-          out.status === "ok" || !out.error
-            ? `Run complete — ${out.new_articles ?? "?"} new / ${out.articles_found ?? "?"} found`
-            : `Run failed — ${out.error}`,
-        error: Boolean(out.error) || out.status === "error",
+        message: out.triggered
+          ? "Run queued — results appear in the run history shortly."
+          : "Run was not queued.",
+        error: !out.triggered,
       });
       onActionDone();
+      // Give the worker a moment, then refresh once more.
+      setTimeout(onActionDone, 5_000);
     } catch (err) {
       setAction({
         busy: null,
@@ -91,13 +106,12 @@ function ScraperCard({
       setAction({
         busy: null,
         message: out.triggered
-          ? `Healing ${out.status ?? "done"} — score ${
-              pct(out.validation_score) ?? "?"
-            }%, v${out.new_version ?? "?"}`
-          : (out.error as string) || "Healing did not trigger",
+          ? "Healing started — the timeline updates when the worker finishes."
+          : "Healing did not start.",
         error: !out.triggered,
       });
       onActionDone();
+      setTimeout(onActionDone, 8_000);
     } catch (err) {
       setAction({
         busy: null,
@@ -200,6 +214,9 @@ function ScraperCard({
           onClick={() => setShowArticles(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${scraper.name} recent articles`}
             className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-edge bg-surface p-4"
             onClick={(e) => e.stopPropagation()}
           >
@@ -208,6 +225,7 @@ function ScraperCard({
                 {scraper.name} — articles
               </h3>
               <button
+                autoFocus
                 onClick={() => setShowArticles(false)}
                 className="rounded border border-edge px-2 py-1 font-mono text-[11px] text-ink-dim hover:text-ink"
               >
@@ -336,7 +354,7 @@ function HealingTimeline({ event }: { event: HealingEvent }) {
           {event.status && (
             <span
               className={`rounded border px-1.5 py-0.5 uppercase tracking-widest ${
-                event.status === "success"
+                (event.status || "").toUpperCase() === "SUCCESS"
                   ? "border-bull/50 text-bull"
                   : "border-bear/50 text-bear"
               }`}

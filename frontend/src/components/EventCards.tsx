@@ -12,12 +12,10 @@ function EventMeta({ event }: { event: MarketEvent }) {
   const now = useNow(30_000);
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
-      {event.market_impact != null && (
+      {event.market_impact && (
         <span>
           IMPACT{" "}
-          <span className="text-ink-dim">
-            {Math.round(Number(event.market_impact))}
-          </span>
+          <span className="text-ink-dim">{event.market_impact}</span>
         </span>
       )}
       {event.confidence != null && (

@@ -2,7 +2,7 @@
 
 export type Sentiment = "BULLISH" | "BEARISH" | "NEUTRAL";
 
-export type UrgencyTier = "CRITICAL" | "HIGH" | "MODERATE" | "RELEVANT";
+export type UrgencyTier = "CRITICAL" | "HIGH" | "RELEVANT" | "MODERATE" | "LOW";
 
 export type HealthStatus = "HEALTHY" | "DEGRADED" | "FAILED" | "HEALING";
 
@@ -14,7 +14,7 @@ export interface MarketEvent {
   ai_summary?: string | null;
   category?: string | null;
   sentiment?: Sentiment | null;
-  market_impact?: number | null;
+  market_impact?: string | null;
   urgency?: number | null;
   confidence?: number | null;
   analysis_status?: string | null;
@@ -178,24 +178,23 @@ export interface HealingHistoryResponse {
   healing_events: HealingEvent[];
 }
 
-/** POST /api/scrapers/{id}/run */
+/** POST /api/scrapers/{id}/run — enqueued on the worker */
 export interface RunOutcome {
+  triggered?: boolean;
+  queued?: string;
+  source?: string;
+  source_id?: number | string;
   status?: string;
-  articles_found?: number | null;
-  new_articles?: number | null;
-  error?: string | null;
-  run_id?: number | string | null;
   [key: string]: unknown;
 }
 
-/** POST /api/scrapers/{id}/heal */
+/** POST /api/scrapers/{id}/heal — enqueued on the worker */
 export interface HealOutcome {
   triggered?: boolean;
+  queued?: string;
   status?: string | null;
-  validation_score?: number | null;
-  new_version?: number | string | null;
-  timeline?: HealingTimelineStep[] | null;
-  error?: string | null;
+  source?: string;
+  source_id?: number | string;
   [key: string]: unknown;
 }
 
@@ -223,7 +222,7 @@ export interface HealthCheck {
 export type StreamEventType =
   | "new"
   | "alerts"
-  | "scrapers"
+  | "scraper_failure"
   | "healed"
   | string;
 
@@ -235,7 +234,7 @@ export interface StreamEnvelope {
 /** "new" → new_event, "alerts" → critical_alert (same shape as a market event) */
 export type NewEventPayload = MarketEvent;
 
-/** "scrapers" → scraper_failure */
+/** "scraper_failure" → scraper_failure */
 export interface ScraperFailurePayload {
   source_id: number | string;
   slug?: string;

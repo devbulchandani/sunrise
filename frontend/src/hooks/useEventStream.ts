@@ -58,7 +58,7 @@ export function useEventStream(handlers: StreamHandlers) {
         }
       });
 
-      es.addEventListener("scrapers", (e) => {
+      es.addEventListener("scraper_failure", (e) => {
         setLastMessageAt(Date.now());
         try {
           handlersRef.current.onScraperFailure?.(

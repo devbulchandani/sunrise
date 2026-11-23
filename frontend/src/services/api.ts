@@ -29,11 +29,6 @@ export class ApiError extends Error {
   }
 }
 
-function adminHeaders(): Record<string, string> {
-  const token = import.meta.env.VITE_ADMIN_TOKEN;
-  return token ? { "X-Admin-Token": token } : {};
-}
-
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -46,7 +41,6 @@ async function request<T>(
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...adminHeaders(),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...init.headers,
       },
