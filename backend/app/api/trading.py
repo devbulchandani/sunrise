@@ -5,30 +5,32 @@ live trading is represented only as an explicit disabled flag.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_admin, require_paper_trader
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.models import TradeProposal
 from app.schemas.trading import (
     AccountOut,
     AuditOut,
     ConfirmOut,
     InstrumentOut,
     OrderOut,
+    PortfolioOut,
     PositionOut,
     ProposalIn,
     ProposalOut,
     QuoteOut,
+    TelegramLinkCodeOut,
+    TelegramLinkOut,
     TradingConfigOut,
 )
-from app.services.trading import broker
+from app.services.trading import broker, telegram_trade
 from app.services.trading.accounts import (
     account_summary,
     get_or_create_account,
     get_or_create_user,
+    portfolio_snapshot,
     position_rows,
 )
 from app.services.trading.instruments import list_instruments
@@ -127,6 +129,61 @@ async def positions(
     return await position_rows(db, paper)
 
 
+@router.get("/portfolio", response_model=PortfolioOut)
+async def portfolio(
+    claims: dict = Depends(require_paper_trader), db: AsyncSession = Depends(get_db)
+):
+    """Account totals plus every holding, weighted and marked to quote."""
+    user = await get_or_create_user(db, claims)
+    paper = await get_or_create_account(db, user)
+    return await portfolio_snapshot(db, paper)
+
+
+@router.get("/telegram", response_model=TelegramLinkOut)
+async def telegram_status(
+    claims: dict = Depends(require_paper_trader), db: AsyncSession = Depends(get_db)
+):
+    user = await get_or_create_user(db, claims)
+    return telegram_trade.link_view(user)
+
+
+@router.post("/telegram/link-code", response_model=TelegramLinkCodeOut, status_code=201)
+async def telegram_link_code(
+    claims: dict = Depends(require_paper_trader), db: AsyncSession = Depends(get_db)
+):
+    """Create a single-use code the user sends to the bot as /link CODE."""
+    user = await get_or_create_user(db, claims)
+    try:
+        code, expires_at = await telegram_trade.issue_link_code(db, user)
+    except broker.TradingError as exc:
+        raise _trading_error(exc) from exc
+    bot = telegram_trade.bot_username()
+    view = telegram_trade.link_view(user)
+    return TelegramLinkCodeOut(
+        linked=view["linked"],
+        chat=view["chat"],
+        code=code,
+        expires_at=expires_at.isoformat(),
+        bot_username=bot,
+        bot_url=telegram_trade.bot_deep_link(),
+        trading_enabled=telegram_trade.paper_ready(),
+        instructions=(
+            f"Open Telegram, message @{bot}, and send /link {code}. "
+            "The code expires in a few minutes and can be used once."
+        ),
+    )
+
+
+@router.delete("/telegram", response_model=TelegramLinkOut)
+async def telegram_unlink(
+    claims: dict = Depends(require_paper_trader), db: AsyncSession = Depends(get_db)
+):
+    user = await get_or_create_user(db, claims)
+    if user.telegram_chat_id:
+        await telegram_trade.unlink_chat(db, user.telegram_chat_id)
+    return telegram_trade.link_view(user)
+
+
 @router.get("/orders", response_model=list[OrderOut])
 async def orders(
     status: str | None = Query(default=None),
@@ -211,26 +268,10 @@ async def reject_proposal(
     db: AsyncSession = Depends(get_db),
 ):
     user = await get_or_create_user(db, claims)
-    proposal = (
-        await db.execute(
-            select(TradeProposal).where(
-                TradeProposal.id == proposal_id,
-                TradeProposal.user_id == user.id,
-            )
-        )
-    ).scalar_one_or_none()
-    if proposal is None:
-        raise HTTPException(status_code=404, detail="proposal not found")
-    if proposal.status != "DRAFT":
-        raise HTTPException(
-            status_code=409,
-            detail=f"proposal is already {proposal.status.lower()}",
-        )
-    proposal.status = "REJECTED"
-    await broker.audit(
-        db, claims, "proposal.rejected", "trade_proposal", proposal_id, {"manual": True}
-    )
-    await db.commit()
+    try:
+        proposal = await broker.reject_proposal(db, user, claims, proposal_id)
+    except broker.TradingError as exc:
+        raise _trading_error(exc) from exc
     return broker.proposal_view(proposal)
 
 

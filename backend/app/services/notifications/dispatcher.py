@@ -18,6 +18,7 @@ from app.models.models import (
 from app.services.analysis.urgency import urgency_level
 from app.services.notifications.email import email_configured, send_email
 from app.services.notifications.telegram import format_event_message, send_telegram, telegram_configured
+from app.services.trading import telegram_trade
 
 log = get_logger("notify.dispatch")
 
@@ -151,7 +152,23 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
             and telegram_configured()
         ):
             if await _claim_notification(session, event.id, "telegram", user.id):
-                ok, err = await _send_telegram_for_user(session, user, event, payload)
+                # Only a chat linked to a verified account gets trade buttons.
+                # A trading-side failure must never suppress the alert itself.
+                trade_markup = None
+                try:
+                    trade_markup = await telegram_trade.trade_keyboard(
+                        session, user, event.id, payload["assets"]
+                    )
+                except Exception as exc:
+                    log.warn(
+                        "notifications.trade_keyboard_failed",
+                        user=user.id,
+                        event=event.id,
+                        error=str(exc)[:200],
+                    )
+                ok, err = await _send_telegram_for_user(
+                    session, user, event, payload, trade_markup
+                )
                 await _mark_sent(session, event.id, "telegram", user.id, ok, err)
                 if ok:
                     sent += 1
@@ -171,7 +188,11 @@ async def dispatch_event_notifications(session: AsyncSession, event_id: int) -> 
 
     # owner's default chat from env — always receives critical+ events,
     # skipped if the owner also subscribed via the bot (would double-send)
-    if telegram_configured() and event.urgency >= settings.telegram_min_urgency:
+    if (
+        telegram_configured()
+        and settings.telegram_chat_id
+        and event.urgency >= settings.telegram_min_urgency
+    ):
         owner_is_subscriber = any(
             u.telegram_chat_id == settings.telegram_chat_id for u in users
         )
@@ -194,6 +215,7 @@ def build_event_message_context(event: MarketEvent, assets) -> dict:
         "event_id": event.id,
         "level": urgency_level(event.urgency),
         "headline": event.headline,
+        "summary": event.summary or event.ai_summary or "",
         "urgency": event.urgency,
         "confidence": event.confidence,
         "sentiment": event.sentiment,
@@ -203,19 +225,24 @@ def build_event_message_context(event: MarketEvent, assets) -> dict:
         "ipo": getattr(event, "ipo_research", None),
         "market_context": getattr(event, "market_context", None),
         "assets": [
-            {"symbol": a.symbol, "impact": a.impact} for a in assets
+            {
+                "symbol": a.symbol,
+                "impact": a.impact,
+                "confidence": getattr(a, "confidence", None),
+            }
+            for a in assets
         ],
         "source_names": getattr(event, "_source_names", []),
         "url": getattr(event, "_primary_url", None),
     }
 
 
-async def _send_telegram_for_user(session, user, event, payload):
+async def _send_telegram_for_user(session, user, event, payload, reply_markup=None):
     """Send one telegram message. The notification row is claimed/updated by
     the caller (claim -> send -> mark); adding another row here would violate
     the uq_notifications_once index."""
     if not telegram_configured():
         return False, ""
     chat_id = user.telegram_chat_id
-    text = format_event_message(payload)
-    return await send_telegram(text, chat_id=chat_id)
+    text = format_event_message(payload, paper_hint=bool(reply_markup))
+    return await send_telegram(text, chat_id=chat_id, reply_markup=reply_markup)

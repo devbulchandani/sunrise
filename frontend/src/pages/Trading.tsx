@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useAuth } from "../services/auth";
 import { ApiError, getEvent } from "../services/api";
 import type { EventDetail } from "../types";
 import type {
   PaperAccount,
   PaperOrder,
-  PaperPosition,
+  PaperPortfolio,
+  PortfolioPosition,
+  TelegramLinkCode,
+  TelegramLinkStatus,
   TradeProposal,
   TradingConfig,
   TradingQuote,
@@ -16,12 +19,16 @@ import {
   cancelPaperOrder,
   confirmProposal,
   createProposal,
+  createTelegramLinkCode,
   getPaperAccount,
   getPaperOrders,
+  getPaperPortfolio,
   getPaperPositions,
+  getTelegramLink,
   getTradingConfig,
   getTradingQuote,
   rejectProposal,
+  unlinkTelegram,
 } from "../services/trading";
 import {
   formatCurrency,
@@ -49,7 +56,9 @@ import {
   ArrowUpRight,
   Check,
   Clock,
+  External,
   Refresh,
+  Send,
   Shield,
   SunriseMark,
   TrendingDown,
@@ -68,6 +77,45 @@ function messageOf(error: unknown): string {
   return "The request could not be completed.";
 }
 
+/**
+ * Older API builds predate GET /trading/portfolio. Rebuild the same shape from
+ * the account + positions endpoints so a dashboard deploy can roll out ahead of
+ * the backend without blanking the desk.
+ */
+async function legacyPortfolio(): Promise<PaperPortfolio> {
+  const [account, positions] = await Promise.all([
+    getPaperAccount(),
+    getPaperPositions(),
+  ]);
+  const invested = positions.reduce(
+    (total, row) => total + row.average_price * row.quantity,
+    0,
+  );
+  const rows: PortfolioPosition[] = positions.map((row) => {
+    const cost = row.average_price * row.quantity;
+    return {
+      ...row,
+      cost_basis: cost,
+      unrealized_pnl_pct: cost > 0 ? (row.unrealized_pnl / cost) * 100 : 0,
+      weight_pct:
+        account.equity > 0 ? (row.market_value / account.equity) * 100 : 0,
+    };
+  });
+  return {
+    account,
+    positions: rows,
+    invested,
+    cash_weight_pct:
+      account.equity > 0 ? (account.cash / account.equity) * 100 : 0,
+    total_return_pct:
+      account.starting_cash > 0
+        ? ((account.equity - account.starting_cash) / account.starting_cash) * 100
+        : 0,
+    position_count: rows.length,
+    mode: account.mode,
+  };
+}
+
 function statusTone(status: string) {
   const value = status.toUpperCase();
   if (value === "FILLED") return "bull" as const;
@@ -79,11 +127,11 @@ function statusTone(status: string) {
 export default function Trading() {
   const { user, ready, configured, signIn } = useAuth();
   const [params] = useSearchParams();
+  const location = useLocation();
   const eventId = params.get("event");
   const [config, setConfig] = useState<TradingConfig | null>(null);
   const [configError, setConfigError] = useState<Error | null>(null);
-  const [account, setAccount] = useState<PaperAccount | null>(null);
-  const [positions, setPositions] = useState<PaperPosition[]>([]);
+  const [portfolio, setPortfolio] = useState<PaperPortfolio | null>(null);
   const [orders, setOrders] = useState<PaperOrder[]>([]);
   const [linkedEvent, setLinkedEvent] = useState<EventDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,14 +190,15 @@ export default function Trading() {
     setLoading(true);
     setDataError(null);
     try {
-      const [nextAccount, nextPositions, nextOrders] = await Promise.all([
-        getPaperAccount(),
-        getPaperPositions(),
-        getPaperOrders(),
-      ]);
-      setAccount(nextAccount);
-      setPositions(nextPositions);
-      setOrders(nextOrders);
+      let nextPortfolio: PaperPortfolio;
+      try {
+        nextPortfolio = await getPaperPortfolio();
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status !== 404) throw err;
+        nextPortfolio = await legacyPortfolio();
+      }
+      setOrders(await getPaperOrders());
+      setPortfolio(nextPortfolio);
     } catch (err) {
       setDataError(err instanceof Error ? err : new Error(String(err)));
     } finally {
@@ -157,9 +206,22 @@ export default function Trading() {
     }
   }, [user]);
 
+  const account = portfolio?.account ?? null;
+  const positions = portfolio?.positions ?? [];
+
   useEffect(() => {
     if (user) void load();
   }, [user, load]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (location.hash === "#telegram") {
+      document.getElementById("telegram")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [location.hash, loading]);
 
   useEffect(() => {
     if (!user || !symbol) return;
@@ -291,7 +353,7 @@ export default function Trading() {
     }
   };
 
-  const sell = (positionRow: PaperPosition) => {
+  const sell = (positionRow: PortfolioPosition) => {
     setSide("SELL");
     setSymbol(positionRow.symbol);
     setQuantity(String(positionRow.quantity));
@@ -349,7 +411,12 @@ export default function Trading() {
                   value={config ? formatCurrency(config.starting_cash) : "—"}
                 />
               </div>
-              <Button variant="primary" size="md" onClick={() => void signIn()} className="w-full">
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => void signIn("/trading")}
+                className="w-full"
+              >
                 Sign in with Cognito
                 <ArrowUpRight className="h-4 w-4" />
               </Button>
@@ -490,7 +557,7 @@ export default function Trading() {
               error={ticketError}
             />
 
-            <PositionsPanel positions={positions} onSell={sell} />
+            <HoldingsPanel positions={positions} onSell={sell} />
 
             <OrdersPanel
               orders={filteredOrders}
@@ -502,7 +569,8 @@ export default function Trading() {
           </div>
 
           <aside className="space-y-5 xl:col-span-4">
-            <AccountPanel account={account} />
+            <PortfolioPanel portfolio={portfolio} />
+            <TelegramPanel />
             <LimitsPanel config={config} />
             <SafetyPanel config={config} />
           </aside>
@@ -841,25 +909,91 @@ function Line({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AccountPanel({ account }: { account: PaperAccount | null }) {
+function PortfolioPanel({ portfolio }: { portfolio: PaperPortfolio | null }) {
+  const account = portfolio?.account;
+  const positions = portfolio?.positions ?? [];
+  const returnPct = portfolio?.total_return_pct ?? 0;
+  const allocation = [
+    {
+      key: "cash",
+      label: "Cash",
+      pct: portfolio?.cash_weight_pct ?? 0,
+      className: "bg-ink-faint/35",
+    },
+    ...positions.slice(0, 8).map((row, index) => ({
+      key: row.symbol,
+      label: row.symbol,
+      pct: row.weight_pct,
+      className: [
+        "bg-amber",
+        "bg-amber/80",
+        "bg-amber/60",
+        "bg-amber/45",
+        "bg-amber/30",
+        "bg-bull/70",
+        "bg-bull/45",
+        "bg-ink-dim/60",
+      ][index] ?? "bg-ink-dim/40",
+    })),
+  ];
   return (
     <Panel className="overflow-hidden">
       <PanelHeader
-        eyebrow="Account"
-        title="Paper portfolio"
-        action={<Wallet className="h-4 w-4 text-amber" />}
+        eyebrow="Portfolio"
+        title="Paper book"
+        action={
+          <Pill tone={returnPct >= 0 ? "bull" : "bear"}>
+            {returnPct >= 0 ? "+" : ""}
+            {returnPct.toFixed(2)}%
+          </Pill>
+        }
       />
       <div className="p-5">
-        <p className="label mb-2">Equity</p>
-        <p className="num text-3xl font-semibold text-ink">
-          {formatCurrency(account?.equity ?? 0)}
-        </p>
-        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">
-          Cash + positions · simulated
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="label mb-2">Equity</p>
+            <p className="num text-3xl font-semibold text-ink">
+              {formatCurrency(account?.equity ?? 0)}
+            </p>
+            <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">
+              Since {formatCurrency(account?.starting_cash ?? 0)} opening cash
+            </p>
+          </div>
+          <Wallet className="mt-1 h-4 w-4 shrink-0 text-amber" />
+        </div>
+
+        <div className="mt-4">
+          <div
+            className="flex h-2 overflow-hidden rounded-full bg-surface-2"
+            role="img"
+            aria-label="Portfolio allocation"
+          >
+            {allocation.map((slice) =>
+              slice.pct > 0 ? (
+                <span
+                  key={slice.key}
+                  className={slice.className}
+                  style={{ width: `${Math.max(slice.pct, 0.5)}%` }}
+                  title={`${slice.label} ${slice.pct.toFixed(1)}%`}
+                />
+              ) : null,
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-faint">
+            {allocation.slice(0, 5).map((slice) => (
+              <span key={slice.key} className="inline-flex items-center gap-1">
+                <span className={cn("h-1.5 w-1.5 rounded-sm", slice.className)} />
+                {slice.label} {slice.pct.toFixed(1)}%
+              </span>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
           <Metric label="Cash" value={formatCurrency(account?.cash ?? 0)} />
-          <Metric label="Positions" value={formatCurrency(account?.positions_value ?? 0)} />
+          <Metric label="Invested" value={formatCurrency(portfolio?.invested ?? 0)} />
+          <Metric label="Holdings" value={formatCurrency(account?.positions_value ?? 0)} />
+          <Metric label="Stocks held" value={account?.position_count ?? 0} />
           <Metric
             label="Unrealised"
             value={signedCurrency(account?.unrealized_pnl ?? 0)}
@@ -870,9 +1004,205 @@ function AccountPanel({ account }: { account: PaperAccount | null }) {
             value={signedCurrency(account?.realized_pnl ?? 0)}
             accent={(account?.realized_pnl ?? 0) >= 0 ? "text-bull" : "text-bear"}
           />
-          <Metric label="Buying power" value={formatCurrency(account?.buying_power ?? 0)} />
-          <Metric label="Positions held" value={account?.position_count ?? 0} />
         </div>
+      </div>
+    </Panel>
+  );
+}
+
+function TelegramPanel() {
+  const { user } = useAuth();
+  const [status, setStatus] = useState<TelegramLinkStatus | null>(null);
+  const [code, setCode] = useState<TelegramLinkCode | null>(null);
+  const [busy, setBusy] = useState<"code" | "unlink" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [available, setAvailable] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getTelegramLink()
+      .then((next) => {
+        if (!cancelled) setStatus(next);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // A dashboard-first rollout can briefly run against an API without the
+        // Telegram bridge; show a quiet note instead of an error banner.
+        if (err instanceof ApiError && err.status === 404) setAvailable(false);
+        else setError(messageOf(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const generate = async () => {
+    setBusy("code");
+    setError(null);
+    setCopied(false);
+    try {
+      const next = await createTelegramLinkCode();
+      setCode(next);
+      setStatus(next);
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy("unlink");
+    setError(null);
+    try {
+      const next = await unlinkTelegram();
+      setStatus(next);
+      setCode(null);
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copy = async () => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(`/link ${code.code}`);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const botName = status?.bot_username || "sunrisescraperbot";
+  const botUrl = status?.bot_url || `https://t.me/${botName}`;
+
+  if (!available) {
+    return (
+      <Panel id="telegram" className="overflow-hidden">
+        <PanelHeader
+          eyebrow="Chat desk"
+          title="Trade from Telegram"
+          action={<Send className="h-4 w-4 text-ink-faint" />}
+        />
+        <p className="p-5 text-[11px] leading-5 text-ink-faint">
+          The Telegram trading bridge is not available on this API build yet.
+          Alerts keep flowing in the meantime.
+        </p>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel id="telegram" className="overflow-hidden">
+      <PanelHeader
+        eyebrow="Chat desk"
+        title="Trade from Telegram"
+        action={<Send className="h-4 w-4 text-amber" />}
+      />
+      <div className="space-y-4 p-5">
+        {status?.linked ? (
+          <Pill tone="bull">
+            <Check className="h-3 w-3" /> Linked · {status.chat}
+          </Pill>
+        ) : (
+          <Pill tone="neutral">Not linked</Pill>
+        )}
+
+        <p className="text-[11px] leading-5 text-ink-dim">
+          Impact alerts in Telegram carry Buy and Sell buttons for stocks in the
+          paper universe. A tap creates a proposal; nothing is submitted until you
+          confirm, and every fill is simulated.
+        </p>
+
+        {status && !status.trading_enabled && (
+          <p className="rounded-lg border border-amber/25 bg-amber/[0.06] px-3 py-2 text-[10px] leading-5 text-amber">
+            Telegram trading is paused by the operator. Linking still works and
+            alerts keep flowing.
+          </p>
+        )}
+
+        {error && (
+          <p className="flex items-start gap-2 rounded-lg border border-bear/25 bg-bear/[0.06] px-3 py-2.5 text-[11px] leading-5 text-bear">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {error}
+          </p>
+        )}
+
+        {status?.linked ? (
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={botUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-edge bg-surface-2/50 px-3 text-xs text-ink-dim transition-colors hover:border-edge-bright hover:text-ink"
+            >
+              Open @{botName}
+              <External className="h-3 w-3" />
+            </a>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void disconnect()}
+              disabled={busy !== null}
+            >
+              {busy === "unlink" ? <Spinner className="h-3.5 w-3.5" /> : null}
+              Disconnect
+            </Button>
+          </div>
+        ) : (
+          <>
+            {code && (
+              <div className="rounded-xl border border-amber/25 bg-amber/[0.06] p-3">
+                <p className="label mb-2">Send this to @{botName}</p>
+                <button
+                  type="button"
+                  onClick={() => void copy()}
+                  className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-amber/30 bg-base/60 px-3 py-2.5 text-left"
+                  title="Copy /link code"
+                >
+                  <span className="select-all font-mono text-sm tracking-[0.18em] text-amber">
+                    /link {code.code}
+                  </span>
+                  <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">
+                    {copied ? "Copied" : "Copy"}
+                  </span>
+                </button>
+                <p className="mt-2 text-[10px] leading-5 text-ink-faint">
+                  Single-use · expires {new Date(code.expires_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })} IST
+                </p>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void generate()}
+                disabled={busy !== null}
+              >
+                {busy === "code" ? <Spinner className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+                {code ? "New link code" : "Generate link code"}
+              </Button>
+              <a
+                href={botUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-edge px-3 text-xs text-ink-dim transition-colors hover:border-edge-bright hover:text-ink"
+              >
+                Open @{botName}
+                <External className="h-3 w-3" />
+              </a>
+            </div>
+            <p className="font-mono text-[9px] uppercase leading-4 tracking-[0.08em] text-ink-faint">
+              The code binds this Telegram chat to your signed-in Sunrise account.
+              One chat, one account.
+            </p>
+          </>
+        )}
       </div>
     </Panel>
   );
@@ -929,35 +1259,37 @@ function SafetyRow({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-function PositionsPanel({
+function HoldingsPanel({
   positions,
   onSell,
 }: {
-  positions: PaperPosition[];
-  onSell: (position: PaperPosition) => void;
+  positions: PortfolioPosition[];
+  onSell: (position: PortfolioPosition) => void;
 }) {
+  const holdingsValue = positions.reduce((total, row) => total + row.market_value, 0);
+  const holdingsPnl = positions.reduce((total, row) => total + row.unrealized_pnl, 0);
   return (
     <Panel className="overflow-hidden">
       <PanelHeader
-        eyebrow="Book"
-        title="Open positions"
+        eyebrow="Holdings"
+        title="Every stock you own"
         action={<Pill tone="neutral">{positions.length}</Pill>}
       />
       {positions.length === 0 ? (
         <div className="p-5">
           <EmptyState
             icon={<TrendingUp className="h-4 w-4" />}
-            title="No open positions."
+            title="No holdings yet."
             hint="Review a paper order to open your first position. Cash stays in the account until you do."
           />
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] border-collapse">
+          <table className="w-full min-w-[820px] border-collapse">
             <thead>
               <tr className="border-b border-edge/70">
-                {["Instrument", "Qty", "Avg", "Last", "Value", "Unrealised", ""].map((heading) => (
-                  <th key={heading} className="px-5 py-3 text-left font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-ink-faint">
+                {["Instrument", "Qty", "Avg cost", "Last", "Value", "Weight", "Unrealised", ""].map((heading) => (
+                  <th key={heading} className="px-4 py-3 text-left font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-ink-faint">
                     {heading}
                   </th>
                 ))}
@@ -966,18 +1298,31 @@ function PositionsPanel({
             <tbody>
               {positions.map((position) => (
                 <tr key={position.symbol} className="border-b border-edge/50 last:border-b-0">
-                  <td className="px-5 py-3">
+                  <td className="px-4 py-3">
                     <p className="num text-xs text-ink">{position.symbol}</p>
                     <p className="truncate text-[10px] text-ink-faint">{position.name}</p>
                   </td>
-                  <td className="num px-5 py-3 text-xs text-ink-dim">{position.quantity}</td>
-                  <td className="num px-5 py-3 text-xs text-ink-dim">{formatCurrency(position.average_price)}</td>
-                  <td className="num px-5 py-3 text-xs text-ink-dim">{formatCurrency(position.last_price)}</td>
-                  <td className="num px-5 py-3 text-xs text-ink-dim">{formatCurrency(position.market_value)}</td>
-                  <td className={cn("num px-5 py-3 text-xs", position.unrealized_pnl >= 0 ? "text-bull" : "text-bear")}>
-                    {signedCurrency(position.unrealized_pnl)}
+                  <td className="num px-4 py-3 text-xs text-ink-dim">{position.quantity}</td>
+                  <td className="num px-4 py-3 text-xs text-ink-dim">{formatCurrency(position.average_price)}</td>
+                  <td className="num px-4 py-3 text-xs text-ink-dim">{formatCurrency(position.last_price)}</td>
+                  <td className="num px-4 py-3 text-xs text-ink-dim">{formatCurrency(position.market_value)}</td>
+                  <td className="px-4 py-3">
+                    <span className="num text-xs text-ink-dim">{position.weight_pct.toFixed(1)}%</span>
+                    <span className="mt-1 block h-1 w-14 overflow-hidden rounded-full bg-surface-2">
+                      <span
+                        className="block h-full bg-amber"
+                        style={{ width: `${Math.min(position.weight_pct, 100)}%` }}
+                      />
+                    </span>
                   </td>
-                  <td className="px-5 py-3 text-right">
+                  <td className={cn("num px-4 py-3 text-xs", position.unrealized_pnl >= 0 ? "text-bull" : "text-bear")}>
+                    {signedCurrency(position.unrealized_pnl)}
+                    <span className="mt-0.5 block font-mono text-[9px] text-ink-faint">
+                      {position.unrealized_pnl_pct >= 0 ? "+" : ""}
+                      {position.unrealized_pnl_pct.toFixed(2)}%
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
                     <Button size="sm" variant="ghost" onClick={() => onSell(position)}>
                       Sell
                     </Button>
@@ -985,6 +1330,19 @@ function PositionsPanel({
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-edge/70 bg-surface-2/30">
+                <td colSpan={4} className="px-4 py-3 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+                  {positions.length} {positions.length === 1 ? "holding" : "holdings"} · simulated
+                </td>
+                <td className="num px-4 py-3 text-xs text-ink">{formatCurrency(holdingsValue)}</td>
+                <td className="num px-4 py-3 text-xs text-ink-faint">100%</td>
+                <td className={cn("num px-4 py-3 text-xs", holdingsPnl >= 0 ? "text-bull" : "text-bear")}>
+                  {signedCurrency(holdingsPnl)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

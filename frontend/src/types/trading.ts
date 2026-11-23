@@ -77,6 +77,36 @@ export interface PaperPosition {
   quote_source: string;
 }
 
+export interface PortfolioPosition extends PaperPosition {
+  cost_basis: number;
+  unrealized_pnl_pct: number;
+  weight_pct: number;
+}
+
+export interface PaperPortfolio {
+  account: PaperAccount;
+  positions: PortfolioPosition[];
+  invested: number;
+  cash_weight_pct: number;
+  total_return_pct: number;
+  position_count: number;
+  mode: string;
+}
+
+export interface TelegramLinkStatus {
+  linked: boolean;
+  chat: string;
+  bot_username: string;
+  bot_url: string;
+  trading_enabled: boolean;
+}
+
+export interface TelegramLinkCode extends TelegramLinkStatus {
+  code: string;
+  expires_at: string;
+  instructions: string;
+}
+
 export interface PaperAccount {
   currency: string;
   starting_cash: number;

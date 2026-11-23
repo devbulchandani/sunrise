@@ -108,6 +108,41 @@ class AccountOut(BaseModel):
     quote_source: str
 
 
+class PortfolioPositionOut(PositionOut):
+    cost_basis: float
+    unrealized_pnl_pct: float
+    weight_pct: float
+
+
+class PortfolioOut(BaseModel):
+    account: AccountOut
+    positions: list[PortfolioPositionOut]
+    invested: float
+    cash_weight_pct: float
+    total_return_pct: float
+    position_count: int
+    mode: str
+
+
+class TelegramLinkOut(BaseModel):
+    linked: bool
+    chat: str
+    bot_username: str
+    bot_url: str
+    trading_enabled: bool
+
+
+class TelegramLinkCodeOut(BaseModel):
+    linked: bool = False
+    chat: str = ""
+    code: str
+    expires_at: str
+    bot_username: str
+    bot_url: str
+    trading_enabled: bool
+    instructions: str
+
+
 class ConfirmOut(BaseModel):
     order: OrderOut
     account: AccountOut

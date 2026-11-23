@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { MarketEvent } from "../types";
-import { relativeTime } from "../lib/format";
+import { impactWord, relativeTime } from "../lib/format";
 import { useNow } from "../hooks/usePolling";
 import { cn } from "../lib/cn";
 import { RadialGauge } from "./Sparkline";
@@ -13,12 +13,14 @@ function EventMeta({ event }: { event: MarketEvent }) {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">
       {event.market_impact && (
         <span>
-          Impact <span className="text-ink-dim">{event.market_impact}</span>
+          AI impact{" "}
+          <span className="text-ink-dim">{impactWord(event.market_impact)}</span>
         </span>
       )}
       {event.confidence != null && (
         <span>
-          Conf <span className="text-ink-dim">{Math.round(Number(event.confidence))}%</span>
+          AI confidence{" "}
+          <span className="text-ink-dim">{Math.round(Number(event.confidence))}%</span>
         </span>
       )}
       {event.article_count != null && (

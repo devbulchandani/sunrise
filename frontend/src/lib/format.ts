@@ -85,3 +85,30 @@ export function signedCurrency(
   const prefix = Number(value) > 0 ? "+" : "";
   return `${prefix}${formatCurrency(value, currency)}`;
 }
+
+const IMPACT_ICON_WORD: Record<string, string> = {
+  positive: "tailwind",
+  negative: "headwind",
+  neutral: "neutral",
+  bullish: "tailwind",
+  bearish: "headwind",
+};
+
+/**
+ * Human label for an AI-estimated impact. "positive"/"negative" are the model's
+ * asset directions; LOW/MEDIUM/HIGH/CRITICAL is the overall market impact.
+ */
+export function impactWord(value: string | number | null | undefined): string {
+  if (value == null) return "unknown";
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return "unknown";
+  return IMPACT_ICON_WORD[raw] ?? raw.replace(/_/g, " ").toUpperCase();
+}
+
+/** Tone class for an AI-estimated asset direction. */
+export function impactTone(value: string | number | null | undefined): "bull" | "bear" | "ink" {
+  const word = impactWord(value);
+  if (word === "tailwind") return "bull";
+  if (word === "headwind") return "bear";
+  return "ink";
+}

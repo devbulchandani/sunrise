@@ -96,14 +96,15 @@ Production URLs:
 - Market pipeline is live on AWS EC2 `i-04187b97cb6a30803` (`t4g.small`, `us-east-1`) with Caddy TLS, Postgres, Redis, API, arq worker, and scheduler.
 - **Paper trading is implemented, tested, and deployed.** It is a Sunrise-owned
   simulator: simulated quotes, per-user ledger, manual confirmation, risk checks,
-  audit trail. It does **not** connect to Upstox/Zerodha/any broker.
+  audit trail, a portfolio view (holdings, weights, cost basis, P&L), and a
+  linked-Telegram ticket. It does **not** connect to Upstox/Zerodha/any broker.
 - **Live trading is deliberately disabled.** `TRADING_ENABLED=false` and no live
   order routes exist. Do not enable live trading without an explicit user decision,
   broker integration, and legal/compliance review.
 - Production paper config: `PAPER_TRADING_ENABLED=true`,
   `PAPER_TRADING_FROZEN=false`, 22 NSE symbols, ₹10,00,000 opening balance,
   ₹20 simulated fee, market-hours enforcement off.
-- Backend test suite: **69 tests passing**. CI (`.github/workflows/ci.yml`) runs
+- Backend test suite: **84 tests passing**. CI (`.github/workflows/ci.yml`) runs
   pytest + `tsc` + Vite build. Keep it green.
 - The repo history was rewritten to purge an accidentally committed EC2 private
   key. The key pair no longer exists and the instance has no SSH key/port 22.
@@ -151,7 +152,7 @@ make backend               # uvicorn :8000
 make worker                # arq worker
 make scheduler             # cron + telegram poller + paper fills
 make frontend              # vite :5173
-make test                  # 69 tests
+make test                  # 84 tests
 ```
 
 - Backend config uses pydantic-settings with `env_file=(".env", "../.env")`;
@@ -240,11 +241,19 @@ Files: `backend/app/services/trading/{accounts,broker,instruments,quotes,risk}.p
    scheduler. Cancellation is only valid for OPEN orders.
 10. **Tests.** Extend `backend/tests/test_trading.py` for any change to risk,
     fills, idempotency, cancel, reconciliation, or auth behavior.
+11. **Telegram bridge.** Trading callbacks are honoured only for a private chat
+    already bound to a Cognito `sub` through a single-use, expiring link code
+    (`PAPER_TELEGRAM_LINK_TTL_SECONDS`). Buttons carry a symbol from the fixed
+    paper universe; free text is never an order. A button creates a proposal; a
+    second tap confirms it through the same `broker.confirm_proposal` path
+    (owner-scoped, risk twice, idempotent, expiring). Refuse group chats and keep
+    `PAPER_TELEGRAM_ENABLED` as a second kill switch.
 
 Trading API (all under `/api/trading`; auth required except `/config` and
 `/instruments`): `config`, `instruments`, `quote/{symbol}`, `account`,
-`positions`, `orders`, `audit`, `proposals`, `proposals/{id}/confirm`,
-`proposals/{id}/reject`, `orders/{id}/cancel`, admin `reconcile`.
+`portfolio`, `positions`, `orders`, `audit`, `proposals`,
+`proposals/{id}/confirm`, `proposals/{id}/reject`, `orders/{id}/cancel`,
+`telegram`, `telegram/link-code`, admin `reconcile`.
 
 ## 8. Frontend guide
 
@@ -258,7 +267,10 @@ Trading API (all under `/api/trading`; auth required except `/config` and
 - `services/api.ts::request()` adds the Cognito bearer token and maps API errors
   to `ApiError`. Reuse it; do not bypass auth.
 - Admin/paper actions require sign-in; the dashboard header handles Cognito
-  sign-in/sign-out.
+  sign-in/sign-out. Clicking the account chip opens a menu (paper desk, Telegram
+  trading, explicit Sign out) — it must never sign the user out directly. The
+  OIDC user is persisted in tab-scoped `sessionStorage` so refresh keeps the
+  session; `AuthCallback` exchanges the code exactly once under StrictMode.
 - The article drawer and review modal use `createPortal` so they layer above the
   sticky header. Keep portal/dialog/Escape/scroll-lock behavior.
 - Verify with `npx tsc --noEmit` and `npm run build` before committing. CI also
@@ -315,9 +327,9 @@ docker compose -f docker-compose.aws.yml up -d --build
 - **Live broker integration** (Upstox sandbox or another broker) is not built.
   It needs a separate explicit decision, broker terms/eligibility review, and
   legal/compliance review for India. Keep `TRADING_ENABLED=false` until then.
-- Telegram **order confirmation** is not implemented; it remains notification-only.
-  If added, use short-lived single-use proposals, chat allowlisting, expiry,
-  replay protection, and the same server-side risk policy.
+- Telegram paper trading is intentionally a **quick ticket**: market orders, one
+  default size, no limit price or quantity picker (use the dashboard for those).
+  Group chats and shared devices are unsupported; linking is private-chat only.
 - Paper trading lacks **partial fills** and derivatives. The paper soak/Phase 3
   work in `docs/plans/trading-execution-phase.md` is still open.
 - Frozen mode currently blocks cancellation as well as new orders; a
@@ -333,7 +345,7 @@ docker compose -f docker-compose.aws.yml up -d --build
 1. `pwd` should be `/Users/devbulchandani/scraper-verse`.
 2. `git status` must be clean; `git log -1`.
 3. Read `README.md`, `SECURITY.md`, and the trading plan.
-4. `cd backend && ./.venv/bin/python -m pytest tests -q` (69 pass).
+4. `cd backend && ./.venv/bin/python -m pytest tests -q` (84 pass).
 5. `cd frontend && npx tsc --noEmit && npm run build`.
 6. If deploying: confirm `aws login` works, then use SSM; deploy Pages with the
    Cloudflare token from `.env`.

@@ -42,9 +42,18 @@ class Settings(BaseSettings):
     paper_fee_per_order: float = 20.0
     paper_slippage_bps: float = 5.0
     paper_proposal_ttl_seconds: int = 900
+    # Telegram bridge: linked chats can review and confirm simulated paper
+    # trades from an impact alert. Kept behind the same paper kill switches and
+    # the server-side risk policy.
+    paper_telegram_enabled: bool = True
+    paper_telegram_ticket_notional: float = 25_000.0
+    paper_telegram_max_symbols: int = 4
+    paper_telegram_link_ttl_seconds: int = 600
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    telegram_bot_username: str = "sunrisescraperbot"
+    public_dashboard_url: str = "https://sunrise-dashboard.pages.dev"
 
     smtp_host: str = ""
     smtp_port: int = 587

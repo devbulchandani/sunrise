@@ -189,6 +189,68 @@ async def account_summary(session: AsyncSession, account: PaperAccount) -> dict:
     }
 
 
+def _pct(value: Decimal, base: Decimal) -> float:
+    if base <= 0:
+        return 0.0
+    result = (value / base * Decimal("100")).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    # Avoid rendering "-0.00%".
+    return 0.0 if result == 0 else float(result)
+
+
+async def portfolio_snapshot(session: AsyncSession, account: PaperAccount) -> dict:
+    """Account totals plus every held stock, weighted and marked to the quote.
+
+    This is the single read the paper desk uses for the portfolio: cash, equity,
+    each position's cost basis, market value, unrealised P&L, and its weight in
+    the book.
+    """
+    summary = await account_summary(session, account)
+    equity = Decimal(str(summary["equity"]))
+    starting = Decimal(str(summary["starting_cash"]))
+    positions = await load_positions(session, account)
+
+    rows: list[dict] = []
+    invested = Decimal("0.00")
+    for position in positions:
+        if position.quantity <= 0:
+            continue
+        quote = get_quote(position.symbol)
+        price = quote.price if quote else position.average_price
+        cost_basis = money(position.average_price * Decimal(position.quantity))
+        market_value = money(price * Decimal(position.quantity))
+        unrealized = money((price - position.average_price) * Decimal(position.quantity))
+        invested += cost_basis
+        rows.append(
+            {
+                "symbol": position.symbol,
+                "name": quote.instrument.name if quote else position.symbol,
+                "quantity": position.quantity,
+                "average_price": float(money(position.average_price)),
+                "last_price": float(money(price)),
+                "cost_basis": float(cost_basis),
+                "market_value": float(market_value),
+                "unrealized_pnl": float(unrealized),
+                "unrealized_pnl_pct": _pct(unrealized, cost_basis),
+                "realized_pnl": float(money(position.realized_pnl)),
+                "weight_pct": _pct(market_value, equity),
+                "currency": account.currency,
+                "quote_source": quote.source if quote else "simulated",
+            }
+        )
+
+    rows.sort(key=lambda row: row["market_value"], reverse=True)
+    cash = Decimal(str(summary["cash"]))
+    return {
+        "account": summary,
+        "positions": rows,
+        "invested": float(money(invested)),
+        "cash_weight_pct": _pct(cash, equity),
+        "total_return_pct": _pct(equity - starting, starting),
+        "position_count": len(rows),
+        "mode": "paper",
+    }
+
+
 def _utc_day_start() -> datetime:
     now = datetime.now(timezone.utc)
     return datetime.combine(now.date(), time.min, tzinfo=timezone.utc)

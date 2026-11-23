@@ -28,6 +28,20 @@ purges cached views — request a sensitive-data purge via
 - Model output can pre-fill a proposal but can never construct, authorize, or
   submit an order payload.
 
+## Telegram paper trading
+
+- A Telegram chat can only trade after a signed-in user generates a single-use
+  link code in the dashboard and sends `/link CODE` to the bot from a **private
+  chat**. Codes expire after 10 minutes.
+- One chat maps to one account. Group chats are refused for linking and for
+  every trade callback.
+- Trade buttons carry a symbol from the fixed paper universe; free text is never
+  parsed into an order payload. The server re-validates the symbol, the owner,
+  the kill switches, and the full risk policy at confirmation time.
+- Proposals are short-lived and single-use. A replayed Confirm returns the
+  existing order instead of creating a second one.
+- `/unlink` detaches the chat; alerts continue but trade buttons stop.
+
 ## Runtime posture
 
 - Secrets are stored in AWS Secrets Manager (`sunrise/production/app-env`) and
@@ -38,4 +52,7 @@ purges cached views — request a sensitive-data purge via
   from an ops shell.
 - Caddy terminates TLS on 80/443. The API binds to `127.0.0.1:8000`; only 80/443
   are reachable from the internet.
+- The dashboard keeps the OIDC user (Cognito access/refresh tokens) in
+  tab-scoped `sessionStorage`: it survives a refresh, is cleared on sign-out and
+  when the tab closes, and is never written to `localStorage`.
 - `TRADING_ENABLED` is fail-closed and no broker is connected.

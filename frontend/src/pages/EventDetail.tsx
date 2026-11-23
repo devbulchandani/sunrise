@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getEvent } from "../services/api";
 import type { EventDetail } from "../types";
-import { formatTimestamp, relativeTime } from "../lib/format";
+import { formatTimestamp, impactTone, impactWord, relativeTime } from "../lib/format";
 import { cn } from "../lib/cn";
 import {
   ArrowUpRight,
@@ -217,7 +217,7 @@ export default function EventDetail() {
             <PanelHeader eyebrow="03 · Assessment" title="How the desk read it" />
             <div className="grid grid-cols-2 gap-px bg-edge/70 sm:grid-cols-4">
               <Assessment label="Sentiment" value={event.sentiment ?? "—"} />
-              <Assessment label="Impact" value={event.market_impact ?? "—"} />
+              <Assessment label="AI impact" value={impactWord(event.market_impact ?? null)} />
               <Assessment label="Confidence" value={event.confidence != null ? `${event.confidence}%` : "—"} />
               <Assessment label="Category" value={(event.category ?? "—").replace(/_/g, " ")} />
             </div>
@@ -430,44 +430,53 @@ export default function EventDetail() {
           <Panel className="overflow-hidden">
             <PanelHeader
               eyebrow="Exposure"
-              title="Affected assets"
-              action={<Pill tone="neutral">{event.affected_assets?.length ?? 0}</Pill>}
+              title="Stocks the AI flags"
+              action={<Pill tone="amber">AI estimate</Pill>}
             />
             <div className="p-5">
               {!event.affected_assets?.length ? (
                 <p className="text-xs text-ink-faint">No asset mapping available.</p>
               ) : (
-                <ul className="space-y-3">
-                  {event.affected_assets.map((asset) => {
-                    const confidence = confidenceOf(asset.confidence);
-                    return (
-                      <li key={asset.symbol}>
-                        <div className="mb-1.5 flex items-center justify-between">
-                          <span className="num text-xs font-semibold text-ink">{asset.symbol}</span>
-                          <span className={cn("font-mono text-[10px] uppercase", impactColor(asset.impact))}>
-                            {String(asset.impact)}
-                          </span>
-                        </div>
-                        <StatBar
-                          value={confidence ?? 50}
-                          tone={
-                            String(asset.impact).toLowerCase().includes("pos")
-                              ? "bull"
-                              : String(asset.impact).toLowerCase().includes("neg")
-                                ? "bear"
-                                : "ink"
-                          }
-                          height={3}
-                        />
-                        {confidence != null && (
-                          <p className="mt-1 font-mono text-[9px] text-ink-faint">
-                            {confidence}% confidence
-                          </p>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  <ul className="space-y-4">
+                    {event.affected_assets.map((asset) => {
+                      const confidence = confidenceOf(asset.confidence);
+                      const word = impactWord(asset.impact);
+                      return (
+                        <li key={asset.symbol}>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="num text-xs font-semibold text-ink">{asset.symbol}</span>
+                            <span className={cn("font-mono text-[10px] uppercase", impactColor(asset.impact))}>
+                              {word}
+                            </span>
+                          </div>
+                          <StatBar
+                            value={confidence ?? 50}
+                            tone={impactTone(asset.impact)}
+                            height={3}
+                            className="mt-1.5"
+                          />
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <p className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-faint">
+                              {confidence != null ? `${confidence}% AI confidence` : "confidence n/a"}
+                            </p>
+                            <Link
+                              to={`/trading?event=${event.id}&symbol=${asset.symbol}`}
+                              className="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.08em] text-amber transition-colors hover:text-[#ffc25c]"
+                            >
+                              Paper trade <ArrowUpRight className="h-2.5 w-2.5" />
+                            </Link>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="mt-4 border-t border-edge/60 pt-3 text-[10px] leading-5 text-ink-faint">
+                    Tailwind / headwind is the model's estimate of how this event
+                    could affect the stock. It is interpretation, not a forecast,
+                    and sizes nothing on its own.
+                  </p>
+                </>
               )}
             </div>
           </Panel>

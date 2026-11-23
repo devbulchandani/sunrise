@@ -146,6 +146,10 @@ See `.env.example`. Key ones:
 | `PAPER_TRADING_ENABLED` | Enables the authenticated paper desk; live trading stays disabled |
 | `PAPER_TRADING_FROZEN` | Emergency freeze for all paper proposals/orders |
 | `PAPER_STARTING_CASH` / `PAPER_MAX_*` | Opening balance and deterministic per-order risk limits |
+| `PAPER_TELEGRAM_ENABLED` | Enable/disable paper-trade buttons in Telegram (default on; still gated by the paper kill switches) |
+| `PAPER_TELEGRAM_TICKET_NOTIONAL` / `PAPER_TELEGRAM_MAX_SYMBOLS` | Default Telegram ticket size (₹25,000 budget) and how many symbols get buttons |
+| `PAPER_TELEGRAM_LINK_TTL_SECONDS` | Lifetime of a one-time `/link` code (default 600) |
+| `TELEGRAM_BOT_USERNAME` / `PUBLIC_DASHBOARD_URL` | Bot handle and dashboard links used in Telegram messages |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
 | `SMTP_*` / `EMAIL_FROM` | Email digests (optional) |
@@ -213,16 +217,39 @@ cannot place a real order.
 5. Every proposal, confirmation, fill, rejection, and cancellation is written
    to `audit_events`; cash and positions are updated in the same transaction.
 
+**Portfolio.** The desk shows one book: equity, cash, invested cost, realised and
+unrealised P&L, total return since the opening balance, and every stock held with
+its quantity, average cost, last simulated price, market value, weight in the
+book, and P&L percentage. The same totals are available from
+`GET /api/trading/portfolio`.
+
+**Telegram trading.** A linked Telegram chat gets Buy/Sell buttons under impact
+alerts for symbols in the paper universe. Tapping a button creates a proposal
+with a default ₹25,000 ticket (sized to holdings for sells); a second tap
+confirms it. Linking is a one-time handshake:
+
+1. On `/trading`, open **Trade from Telegram** and generate a link code.
+2. Send `/link CODE` to [@sunrisescraperbot](https://t.me/sunrisescraperbot) from
+   a **private chat**. Codes are single-use and expire in 10 minutes.
+3. The bot then shows `/portfolio`, trade buttons, and confirmations for that chat.
+   `/unlink` disconnects it.
+
+Group chats are refused, free text is never parsed into an order, and every
+Telegram order still runs the same server-side risk policy and expiry as the
+dashboard.
+
 **API** (`/api/trading`, Cognito access token required except `/config` and
 `/instruments`):
 
 ```
 GET  /config                      GET  /instruments
 GET  /quote/{symbol}              GET  /account
-GET  /positions                   GET  /orders
-GET  /audit                       POST /proposals
-POST /proposals/{id}/confirm      POST /proposals/{id}/reject
-POST /orders/{id}/cancel         POST /reconcile   (admin)
+GET  /portfolio                   GET  /positions
+GET  /orders                      GET  /audit
+POST /proposals                   POST /proposals/{id}/confirm
+POST /proposals/{id}/reject       POST /orders/{id}/cancel
+GET  /telegram                    POST /telegram/link-code
+DELETE /telegram                  POST /reconcile   (admin)
 ```
 
 **Guardrails:** sandbox/simulated quotes only, explicit manual confirmation, no
@@ -232,11 +259,15 @@ isolation by Cognito subject, durable audit events, and independent
 generated from a seeded, slowly drifting base price and are labelled
 `simulated` everywhere. Market-hours enforcement defaults to off so the desk
 can be exercised outside NSE hours; turn it on with
-`PAPER_ENFORCE_MARKET_HOURS=true`.
+`PAPER_ENFORCE_MARKET_HOURS=true`. Telegram trading adds a second gate,
+`PAPER_TELEGRAM_ENABLED`, plus private-chat-only linking, single-use codes, and
+proposal expiry.
 
 **Not implemented:** live broker connectivity, Upstox sandbox credentials,
-Telegram-originated order confirmation, partial fills, and options/futures.
-Live execution remains a separate release gate (see the trading plan).
+partial fills, and options/futures. The Telegram ticket is deliberately simple:
+market orders only, one default size, no limit price or quantity picker (use the
+dashboard for those). Live execution remains a separate release gate (see the
+trading plan).
 
 ## Deployment
 
@@ -252,7 +283,7 @@ Admin actions (`Run now`, `Heal`) authenticate with the signed-in user's Cognito
 
 > **Security note:** see [SECURITY.md](SECURITY.md). an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling. GitHub may continue to serve the old blob by commit SHA until support purges cached views; request a sensitive-data purge if that matters for your threat model.
 
-The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend verifies Cognito access tokens for the paper desk; existing market-data routes remain public. Paper trading is enabled in production (`PAPER_TRADING_ENABLED=true`) with simulated quotes and `TRADING_ENABLED=false`; the live broker remains disconnected. **Live trading is disabled and no broker is connected.** See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
+The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend verifies Cognito access tokens for the paper desk; existing market-data routes remain public. The OIDC user (access/refresh tokens) is kept in tab-scoped `sessionStorage` so a refresh does not drop the session, and signing out clears it. Paper trading is enabled in production (`PAPER_TRADING_ENABLED=true`) with simulated quotes and `TRADING_ENABLED=false`; the live broker remains disconnected. **Live trading is disabled and no broker is connected.** See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
 
 Inside the SSM session, update the checkout and restart the stack with:
 
@@ -341,10 +372,19 @@ Subscriber commands:
 | `/urgency 80` | Only receive events at that threshold or higher |
 | `/assets BTC,SPY` | Only events touching those symbols |
 | `/categories crypto,macro` | Filter: `crypto`, `macro`, `stocks`, `geopolitics`, `commodities` |
-| `/status` | Show current settings |
+| `/status` | Show current settings, including whether Telegram trading is linked |
+| `/portfolio` | Your simulated paper holdings and P&L |
+| `/link CODE` | Link this private chat to your signed-in Sunrise account |
+| `/unlink` | Disconnect Telegram trading (alerts continue) |
+| `/help` | How alerts and paper trading work |
 | `/stop` | Unsubscribe |
 
 Every new subscriber receives a welcome message stating that alerts are AI interpretation with confidence levels — never financial advice.
+
+**Paper-trade buttons.** Linked chats see Buy buttons for up to four affected
+symbols in the paper universe (plus Sell when a position is held). A tap creates
+a proposal; a Confirm tap submits it. Buttons are never shown in group chats, and
+unlinked subscribers keep receiving notification-only alerts.
 
 To run the poller standalone instead of inside the scheduler:
 
@@ -355,7 +395,7 @@ python -m app.services.notifications.bot_subscribers
 ## Running tests
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest tests -q    # 69 tests
+cd backend && ./.venv/bin/python -m pytest tests -q    # 84 tests
 ```
 
 Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomaly detection, dedup fingerprints, candidate safety checks, accept/reject validation paths, urgency blending bounds, Telegram formatting (incl. no-prediction language), clustering similarity, and API round-trips on an isolated SQLite DB.
@@ -370,7 +410,7 @@ Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomal
 ## Known limitations
 
 - Paper trading uses simulated quotes, not a market-data feed; it is a ledger simulator, not a broker sandbox.
-- Live broker connectivity, Telegram-originated order confirmation, partial fills, and derivatives are not implemented.
+- Live broker connectivity, partial fills, and derivatives are not implemented. Telegram trading is paper-only and limited to market orders.
 - Event clustering combines fuzzy title matching with token overlap inside a 48h window. It rejects template headlines ("X Share Price Live Updates") but is not full entity resolution.
 - Network/anti-bot failures are retried with backoff and alerted on, but deliberately do not trigger strategy healing — a new selector cannot fix a blocked request.
 - Playwright not wired in; JS-rendered listings aren't supported yet.

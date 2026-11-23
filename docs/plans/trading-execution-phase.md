@@ -1,10 +1,10 @@
 # Sunrise trading execution: next phase plan
 
-Status: **paper trading implemented and deployed**. The authenticated Paper Desk is live at `/trading` on the dashboard; live broker integration is not connected and no live orders can be submitted.
+Status: **paper trading implemented and deployed**, including a portfolio view and a linked-Telegram quick ticket. The authenticated Paper Desk is live at `/trading` on the dashboard; live broker integration is not connected and no live orders can be submitted.
 
 ## Current project state
 
-Sunrise scrapes market news, clusters articles, analyzes events through an LLM, stores affected symbols and urgency, shows results in a React dashboard, and sends Telegram notifications. The LLM client supports OpenAI-compatible endpoints, Anthropic, and Bedrock Runtime. Telegram currently handles subscriptions and alert preferences; it has no trading commands. The dashboard has no user login. The Cloudflare Worker forwards requests to a public backend and adds wildcard CORS. API reads are public; only a few operational write routes use an optional admin-token dependency. Authentication and authorization are therefore the first prerequisites for trade controls.
+Sunrise scrapes market news, clusters articles, analyzes events through an LLM, stores affected symbols and urgency, shows results in a React dashboard, and sends Telegram notifications. The LLM client supports OpenAI-compatible endpoints, Anthropic, and Bedrock Runtime. Telegram handles subscriptions, alert preferences, and a linked paper-trade quick ticket. The dashboard signs users in with Cognito. The Cloudflare Worker forwards requests to the backend and applies an origin allowlist. Market-data reads are public; account and order routes require a verified Cognito identity; operational writes require admin authorization.
 
 ## Research findings
 
@@ -57,12 +57,13 @@ Sunrise scrapes market news, clusters articles, analyzes events through an LLM, 
 - Deterministic server-side checks at proposal **and** confirmation time: symbol eligibility, quantity, limit band, per-order notional, buying power, position cap, gross exposure, daily order cap, daily realised-loss cap, and optional NSE market hours.
 - Idempotent confirmation (`proposal_id` and `(account_id, client_order_id)` uniqueness), market fills with simulated slippage, open limit orders filled by a scheduler, cancellation, and a transactional cash/position/ledger update.
 - Durable audit events for proposal creation, confirmation, fill, rejection, and cancellation; an admin reconciliation endpoint recomputes cash and positions from filled orders.
-- Authenticated dashboard **Paper desk** with account summary, order ticket, risk-check review modal, positions, orders, cancellation, and per-order limits.
+- Authenticated dashboard **Paper desk** with a portfolio book (equity, invested cost, realised/unrealised P&L, total return, holdings with weights and cost basis), order ticket, risk-check review modal, orders, cancellation, and per-order limits.
+- **Linked Telegram quick ticket**: a signed-in user generates a single-use code on the desk and sends `/link CODE` from a private chat. Impact alerts then carry Buy/Sell buttons for up to four paper-universe symbols; a tap creates a short-lived proposal and a second tap confirms it through the same risk and audit path. Group chats are refused, free text is never an order, and `/portfolio` shows the simulated book in chat.
 - Independent `PAPER_TRADING_ENABLED` and `PAPER_TRADING_FROZEN` kill switches; `TRADING_ENABLED` remains false and no live broker credentials exist.
 
-**Deployed and verified:** production `/api/trading/config` reports `paper_enabled=true`, `live_enabled=false`, 22 instruments and a ₹10,00,000 opening balance; `/api/trading/account` returns 401 without a bearer token; the paper tables (`paper_accounts`, `paper_positions`, `paper_orders`, `trade_proposals`, `paper_ledger`, `audit_events`) and `users.cognito_sub` exist; the CI suite is green with 69 backend tests.
+**Deployed and verified:** production `/api/trading/config` reports `paper_enabled=true`, `live_enabled=false`, 22 instruments and a ₹10,00,000 opening balance; `/api/trading/account` returns 401 without a bearer token; the paper tables (`paper_accounts`, `paper_positions`, `paper_orders`, `trade_proposals`, `paper_ledger`, `audit_events`) and `users.cognito_sub` exist; the CI suite is green with 84 backend tests.
 
-**Still open for the full Phase 2 exit:** Telegram-originated confirmation (orders are dashboard-confirmed only), Upstox connector contract tests, partial fills, and a multi-session paper soak.
+**Still open for the full Phase 2 exit:** Upstox connector contract tests, partial fills, a multi-session paper soak, and a richer Telegram ticket (limit price and quantity selection; the current quick ticket is market-only with one default size).
 
 ### Phase 3 — shadowing, paper soak, and readiness
 

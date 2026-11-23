@@ -520,6 +520,34 @@ async def _apply_order(
     )
 
 
+async def reject_proposal(
+    session: AsyncSession, user: User, claims: dict, proposal_id: int
+) -> TradeProposal:
+    """Reject a draft proposal. Owner-scoped and single-use."""
+    proposal = (
+        await session.execute(
+            select(TradeProposal)
+            .where(TradeProposal.id == proposal_id, TradeProposal.user_id == user.id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise TradingError("Proposal not found.", 404)
+    if proposal.status != "DRAFT":
+        raise TradingError(f"Proposal is already {proposal.status.lower()}.", 409)
+    proposal.status = "REJECTED"
+    await audit(
+        session,
+        claims,
+        "proposal.rejected",
+        "trade_proposal",
+        proposal.id,
+        {"manual": True},
+    )
+    await session.commit()
+    return proposal
+
+
 async def cancel_order(
     session: AsyncSession, user: User, claims: dict, order_id: int
 ) -> PaperOrder:

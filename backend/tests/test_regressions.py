@@ -41,8 +41,14 @@ class TestTelegramMessage:
 
     def test_markets_block_rendered_once(self):
         text = format_event_message(self.EVENT)
-        assert text.count("Markets potentially affected") == 1
+        assert text.count("MARKETS MENTIONED") == 1
         assert "US Equities" in text
+
+    def test_sections_separate_fact_from_ai(self):
+        text = format_event_message(self.EVENT)
+        assert "WHAT HAPPENED" in text
+        assert "WHY IT MAY MATTER (AI interpretation, not a forecast)" in text
+        assert "🟢" not in text  # negative asset must not look like a tailwind
 
     def test_no_prediction_language(self):
         lowered = format_event_message(self.EVENT).lower()

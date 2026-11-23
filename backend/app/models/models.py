@@ -409,3 +409,24 @@ class AuditEvent(Base):
     entity_id: Mapped[str | None] = mapped_column(String(64))
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TelegramLinkCode(Base):
+    """Short-lived, single-use code that binds a Telegram chat to a Cognito user.
+
+    Generated on the authenticated paper desk; the user sends ``/link CODE`` to
+    the bot. Trading callbacks are only honoured for a chat already bound here,
+    so unlinked subscribers can never place a paper order.
+    """
+
+    __tablename__ = "telegram_link_codes"
+    __table_args__ = (
+        Index("ix_telegram_link_codes_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    code: Mapped[str] = mapped_column(String(16), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

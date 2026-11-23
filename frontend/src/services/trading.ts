@@ -4,7 +4,10 @@ import type {
   ConfirmResult,
   PaperAccount,
   PaperOrder,
+  PaperPortfolio,
   PaperPosition,
+  TelegramLinkCode,
+  TelegramLinkStatus,
   TradeProposal,
   TradingConfig,
   TradingQuote,
@@ -20,6 +23,22 @@ export function getPaperAccount(): Promise<PaperAccount> {
 
 export function getPaperPositions(): Promise<PaperPosition[]> {
   return request<PaperPosition[]>("/trading/positions");
+}
+
+export function getPaperPortfolio(): Promise<PaperPortfolio> {
+  return request<PaperPortfolio>("/trading/portfolio");
+}
+
+export function getTelegramLink(): Promise<TelegramLinkStatus> {
+  return request<TelegramLinkStatus>("/trading/telegram");
+}
+
+export function createTelegramLinkCode(): Promise<TelegramLinkCode> {
+  return request<TelegramLinkCode>("/trading/telegram/link-code", { method: "POST" });
+}
+
+export function unlinkTelegram(): Promise<TelegramLinkStatus> {
+  return request<TelegramLinkStatus>("/trading/telegram", { method: "DELETE" });
 }
 
 export function getPaperOrders(): Promise<PaperOrder[]> {
