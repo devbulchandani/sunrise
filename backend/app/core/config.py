@@ -25,7 +25,23 @@ class Settings(BaseSettings):
     cognito_user_pool_id: str = ""
     cognito_app_client_id: str = ""
     cognito_domain: str = ""  # managed-login domain for the userInfo fallback
+    # Live broker execution is intentionally disabled. Paper trading is a
+    # separate, simulated environment with its own kill switch.
     trading_enabled: bool = False
+    paper_trading_enabled: bool = False
+    paper_trading_frozen: bool = False
+    paper_currency: str = "INR"
+    paper_starting_cash: float = 1_000_000.0
+    paper_enforce_market_hours: bool = False
+    paper_max_order_notional: float = 100_000.0
+    paper_max_position_notional: float = 300_000.0
+    paper_max_gross_exposure: float = 1_000_000.0
+    paper_max_daily_orders: int = 20
+    paper_max_daily_loss: float = 25_000.0
+    paper_limit_band_pct: float = 20.0
+    paper_fee_per_order: float = 20.0
+    paper_slippage_bps: float = 5.0
+    paper_proposal_ttl_seconds: int = 900
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

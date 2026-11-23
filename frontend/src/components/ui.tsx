@@ -13,15 +13,19 @@ export function Panel({
   children,
   className,
   hover = false,
+  id,
   as: Tag = "div",
 }: {
   children: ReactNode;
   className?: string;
   hover?: boolean;
+  id?: string;
   as?: "div" | "section" | "article" | "aside";
 }) {
   return (
-    <Tag className={cn("panel", hover && "panel-hover", className)}>{children}</Tag>
+    <Tag id={id} className={cn("panel", hover && "panel-hover", className)}>
+      {children}
+    </Tag>
   );
 }
 

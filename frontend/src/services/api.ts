@@ -29,7 +29,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
@@ -53,6 +53,8 @@ async function request<T>(
     try {
       const body = await res.json();
       if (body && typeof body.detail === "string") detail = body.detail;
+      else if (body && body.detail && typeof body.detail.message === "string")
+        detail = body.detail.message;
     } catch {
       /* body was not JSON */
     }

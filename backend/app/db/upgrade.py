@@ -63,6 +63,16 @@ async def _ensure_clustering_index(conn: AsyncConnection) -> None:
     )
 
 
+async def _ensure_cognito_sub(conn: AsyncConnection) -> None:
+    if conn.dialect.name == "postgresql":
+        await conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS cognito_sub VARCHAR(128)")
+        )
+    await conn.execute(
+        text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_cognito_sub ON users (cognito_sub)")
+    )
+
+
 async def _ensure_analysis_attempts(conn: AsyncConnection) -> None:
     # create_all only creates missing tables, not missing columns on existing
     # deployments. Postgres supports ADD COLUMN IF NOT EXISTS; SQLite test
@@ -83,3 +93,4 @@ async def ensure_schema(engine: AsyncEngine) -> None:
         await _ensure_article_uniqueness(conn)
         await _ensure_clustering_index(conn)
         await _ensure_analysis_attempts(conn)
+        await _ensure_cognito_sub(conn)

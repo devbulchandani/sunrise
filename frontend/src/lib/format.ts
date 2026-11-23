@@ -63,3 +63,25 @@ export function formatNumber(n: number | null | undefined): string {
   if (n == null) return "—";
   return new Intl.NumberFormat("en-US").format(n);
 }
+
+export function formatCurrency(
+  value: number | null | undefined,
+  currency = "INR",
+): string {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+export function signedCurrency(
+  value: number | null | undefined,
+  currency = "INR",
+): string {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const prefix = Number(value) > 0 ? "+" : "";
+  return `${prefix}${formatCurrency(value, currency)}`;
+}

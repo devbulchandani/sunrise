@@ -8,11 +8,11 @@ import {
   ArrowUpRight,
   Clock,
   External,
-  Globe,
   Layers,
   Radar,
   Shield,
   Sparkle,
+  TrendingUp,
 } from "../components/icons";
 import {
   ApiErrorBanner,
@@ -158,16 +158,25 @@ export default function EventDetail() {
                 {market}
               </span>
             ))}
-            {sourceHref && (
-              <a
-                href={sourceHref}
-                target="_blank"
-                rel="noreferrer"
-                className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-amber/30 bg-amber/[0.08] px-3 py-1.5 text-xs font-medium text-amber transition-colors hover:border-amber/60 hover:bg-amber/15"
+            <div className="ml-auto flex items-center gap-2">
+              <Link
+                to={`/trading?event=${event.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2/60 px-3 py-1.5 text-xs font-medium text-ink-dim transition-colors hover:border-amber/50 hover:text-amber"
               >
-                Open source <External className="h-3.5 w-3.5" />
-              </a>
-            )}
+                <TrendingUp className="h-3.5 w-3.5" />
+                Paper trade
+              </Link>
+              {sourceHref && (
+                <a
+                  href={sourceHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber/30 bg-amber/[0.08] px-3 py-1.5 text-xs font-medium text-amber transition-colors hover:border-amber/60 hover:bg-amber/15"
+                >
+                  Open source <External className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </header>

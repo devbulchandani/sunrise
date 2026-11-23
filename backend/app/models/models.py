@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
@@ -7,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Numeric,
     Index,
     Integer,
     String,
@@ -54,6 +56,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True)
+    cognito_sub: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -268,3 +271,141 @@ class MetricCounter(Base):
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# ---------------------------------------------------------------- paper trading
+
+
+class PaperAccount(Base):
+    __tablename__ = "paper_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True
+    )
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    starting_cash: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    cash: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PaperPosition(Base):
+    __tablename__ = "paper_positions"
+    __table_args__ = (
+        UniqueConstraint("account_id", "symbol", name="uq_paper_position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id", ondelete="CASCADE")
+    )
+    symbol: Mapped[str] = mapped_column(String(32))
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    average_price: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), default=Decimal("0")
+    )
+    realized_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), default=Decimal("0")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class TradeProposal(Base):
+    __tablename__ = "trade_proposals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("market_events.id", ondelete="SET NULL")
+    )
+    symbol: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(8))  # BUY | SELL
+    order_type: Mapped[str] = mapped_column(String(12))  # MARKET | LIMIT
+    quantity: Mapped[int] = mapped_column(Integer)
+    limit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    rationale: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(16), default="DRAFT"
+    )  # DRAFT | CONFIRMED | EXECUTED | REJECTED | EXPIRED
+    quote_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    quote_source: Mapped[str] = mapped_column(String(24), default="simulated")
+    risk_snapshot: Mapped[list] = mapped_column(JSON, default=list)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PaperOrder(Base):
+    __tablename__ = "paper_orders"
+    __table_args__ = (
+        UniqueConstraint("account_id", "client_order_id", name="uq_paper_client_order"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id", ondelete="CASCADE")
+    )
+    proposal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("trade_proposals.id", ondelete="SET NULL"), unique=True
+    )
+    client_order_id: Mapped[str] = mapped_column(String(64))
+    symbol: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(8))
+    order_type: Mapped[str] = mapped_column(String(12))
+    quantity: Mapped[int] = mapped_column(Integer)
+    limit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    status: Mapped[str] = mapped_column(
+        String(20), default="SUBMITTED"
+    )  # SUBMITTED | OPEN | FILLED | CANCELLED | REJECTED
+    filled_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    average_fill_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    quote_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    quote_source: Mapped[str] = mapped_column(String(24), default="simulated")
+    notional: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    fee: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    risk_snapshot: Mapped[list] = mapped_column(JSON, default=list)
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PaperLedgerEntry(Base):
+    __tablename__ = "paper_ledger"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id", ondelete="CASCADE")
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("paper_orders.id", ondelete="SET NULL")
+    )
+    kind: Mapped[str] = mapped_column(String(16))  # DEPOSIT | TRADE | FEE
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_actor_created", "actor_sub", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_sub: Mapped[str] = mapped_column(String(128))
+    actor_email: Mapped[str | None] = mapped_column(String(320))
+    action: Mapped[str] = mapped_column(String(64))
+    entity_type: Mapped[str] = mapped_column(String(32))
+    entity_id: Mapped[str | None] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

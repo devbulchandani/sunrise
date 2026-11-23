@@ -14,6 +14,20 @@ history. GitHub may continue to serve the old blob by commit SHA until support
 purges cached views — request a sensitive-data purge via
 <https://support.github.com/contact/private-information>. Do not reuse that key.
 
+## Paper trading
+
+- The paper desk is a Sunrise-owned simulator: **no broker is contacted**, no
+  broker credentials exist, and quotes are generated locally and labelled
+  `simulated`.
+- Live execution is fail-closed with `TRADING_ENABLED=false`; the paper desk has
+  its own `PAPER_TRADING_ENABLED` and `PAPER_TRADING_FROZEN` kill switches.
+- Every order requires an authenticated Cognito session and an explicit
+  confirmation after a server-side risk report.
+- Proposals, confirmations, fills, rejections, and cancellations are recorded in
+  `audit_events`; accounts and positions are isolated by Cognito subject.
+- Model output can pre-fill a proposal but can never construct, authorize, or
+  submit an order payload.
+
 ## Runtime posture
 
 - Secrets are stored in AWS Secrets Manager (`sunrise/production/app-env`) and

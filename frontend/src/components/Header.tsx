@@ -16,6 +16,7 @@ import {
 const NAV = [
   { to: "/", label: "Pulse", hint: "Market pulse" },
   { to: "/scrapers", label: "Collectors", hint: "Collector health" },
+  { to: "/trading", label: "Paper desk", hint: "Paper trading" },
   { to: "/system", label: "Operations", hint: "System" },
 ];
 

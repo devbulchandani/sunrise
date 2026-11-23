@@ -142,7 +142,10 @@ See `.env.example`. Key ones:
 | `LLM_API_KEY` | Provider key. For Bedrock Mantle, use the Bedrock bearer API key; it is sent as an `Authorization: Bearer` token |
 | `LLM_BEDROCK_REGION` | Bedrock selected Region; defaults to `us-east-1` |
 | `COGNITO_REGION` / `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` / `COGNITO_DOMAIN` | Cognito access-token verification and the userInfo fallback used to resolve the admin email |
-| `TRADING_ENABLED` | Trading authorization is fail-closed (`false` by default); no order routes are enabled yet |
+| `TRADING_ENABLED` | Live broker execution is fail-closed (`false`); no live order routes exist |
+| `PAPER_TRADING_ENABLED` | Enables the authenticated paper desk; live trading stays disabled |
+| `PAPER_TRADING_FROZEN` | Emergency freeze for all paper proposals/orders |
+| `PAPER_STARTING_CASH` / `PAPER_MAX_*` | Opening balance and deterministic per-order risk limits |
 | `ARTICLE_RETENTION_DAYS` | Remove scraped articles older than this many days; defaults to 30 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram bot and owner destination; subscribers can also link their chat through the bot |
 | `SMTP_*` / `EMAIL_FROM` | Email digests (optional) |
@@ -190,6 +193,51 @@ Events categorized as `IPO` automatically trigger a multi-step research agent af
 
 The brief is stored on the event (`ipo_research`), rendered in the dashboard's **IPO Deep-Dive** section, and summarized in Telegram alerts. Every output is labeled AI interpretation with confidence and sources — the pipeline never recommends buying, and degrades honestly (marking claims `unverified`) when web tools are rate-limited.
 
+## Paper trading desk
+
+Sunrise includes a **Sunrise-owned paper trading simulator** for the India-only
+universe. It does not connect to Upstox, Zerodha, or any other broker, and it
+cannot place a real order.
+
+**Flow**
+
+1. Open **Paper desk** in the dashboard (`/trading`) and sign in with Cognito.
+2. Pick an NSE symbol from the curated universe, choose Buy/Sell and
+   Market/Limit, and set a quantity.
+3. **Review order** creates a short-lived proposal with a simulated quote and a
+   full risk-check report (buying power, position cap, gross exposure, daily
+   order/loss caps, limit band, market hours, duplicate/quantity checks).
+4. Only **Confirm paper order** submits it. Market orders fill immediately
+   against the simulated quote; crossed limits fill, otherwise they rest open
+   and are checked once a minute. Any open order can be cancelled.
+5. Every proposal, confirmation, fill, rejection, and cancellation is written
+   to `audit_events`; cash and positions are updated in the same transaction.
+
+**API** (`/api/trading`, Cognito access token required except `/config` and
+`/instruments`):
+
+```
+GET  /config                      GET  /instruments
+GET  /quote/{symbol}              GET  /account
+GET  /positions                   GET  /orders
+GET  /audit                       POST /proposals
+POST /proposals/{id}/confirm      POST /proposals/{id}/reject
+POST /orders/{id}/cancel         POST /reconcile   (admin)
+```
+
+**Guardrails:** sandbox/simulated quotes only, explicit manual confirmation, no
+LLM-generated order payloads, deterministic server-side limits, per-user
+isolation by Cognito subject, durable audit events, and independent
+`PAPER_TRADING_ENABLED` / `PAPER_TRADING_FROZEN` kill switches. Quotes are
+generated from a seeded, slowly drifting base price and are labelled
+`simulated` everywhere. Market-hours enforcement defaults to off so the desk
+can be exercised outside NSE hours; turn it on with
+`PAPER_ENFORCE_MARKET_HOURS=true`.
+
+**Not implemented:** live broker connectivity, Upstox sandbox credentials,
+Telegram-originated order confirmation, partial fills, and options/futures.
+Live execution remains a separate release gate (see the trading plan).
+
 ## Deployment
 
 | Component | Host | Notes |
@@ -204,7 +252,7 @@ Admin actions (`Run now`, `Heal`) authenticate with the signed-in user's Cognito
 
 > **Security note:** see [SECURITY.md](SECURITY.md). an early commit accidentally tracked an EC2 deploy key. The key pair no longer exists in AWS and the file has been purged from git history; SSH access is disabled entirely (SSM only). If you cloned this repository before that rewrite, re-clone rather than pulling. GitHub may continue to serve the old blob by commit SHA until support purges cached views; request a sensitive-data purge if that matters for your threat model.
 
-The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend currently verifies Cognito access tokens for future private API routes; existing market-data routes remain public. Trading is still disabled and no broker is connected. See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
+The dashboard's Cognito public configuration is in `frontend/.env.production` (pool and client IDs are public identifiers, not secrets). Open registration requires email verification and TOTP MFA. Browser tokens are memory-only; the Cloudflare Worker CORS policy allows the Pages dashboard plus local development. The backend verifies Cognito access tokens for the paper desk; existing market-data routes remain public. **Live trading is disabled and no broker is connected.** See [the trading phase plan](docs/plans/trading-execution-phase.md) for the India-only paper/manual milestones and regulatory gates.
 
 Inside the SSM session, update the checkout and restart the stack with:
 
@@ -253,6 +301,13 @@ GET  /api/scrapers/{id}/articles    (recent articles per collector)
 POST /api/scrapers/{id}/run          POST /api/scrapers/{id}/heal
 GET  /api/stats                      GET  /api/stream   (SSE live updates)
 GET  /api/preferences                PUT  /api/preferences
+
+GET  /api/trading/config             GET  /api/trading/instruments
+GET  /api/trading/account            GET  /api/trading/positions
+GET  /api/trading/orders             POST /api/trading/proposals
+POST /api/trading/proposals/{id}/confirm
+POST /api/trading/proposals/{id}/reject
+POST /api/trading/orders/{id}/cancel
 ```
 
 `POST /api/scrapers/{id}/run` and `/heal` enqueue work on the arq worker and
@@ -300,7 +355,7 @@ python -m app.services.notifications.bot_subscribers
 ## Running tests
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest tests -q    # 57 tests
+cd backend && ./.venv/bin/python -m pytest tests -q    # 69 tests
 ```
 
 Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomaly detection, dedup fingerprints, candidate safety checks, accept/reject validation paths, urgency blending bounds, Telegram formatting (incl. no-prediction language), clustering similarity, and API round-trips on an isolated SQLite DB.
@@ -314,7 +369,8 @@ Covers: extraction methods (CSS/XPath/JSON-LD/OG), malformed HTML, health anomal
 
 ## Known limitations
 
-- Preferences still use the single-tenant demo user; dashboard sign-in currently gates admin actions and `/api/auth/me`.
+- Paper trading uses simulated quotes, not a market-data feed; it is a ledger simulator, not a broker sandbox.
+- Live broker connectivity, Telegram-originated order confirmation, partial fills, and derivatives are not implemented.
 - Event clustering combines fuzzy title matching with token overlap inside a 48h window. It rejects template headlines ("X Share Price Live Updates") but is not full entity resolution.
 - Network/anti-bot failures are retried with backoff and alerted on, but deliberately do not trigger strategy healing — a new selector cannot fix a blocked request.
 - Playwright not wired in; JS-rendered listings aren't supported yet.

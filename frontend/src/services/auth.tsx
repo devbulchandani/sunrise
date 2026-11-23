@@ -29,7 +29,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const region = import.meta.env.VITE_COGNITO_REGION || "us-east-1";
 const poolId = import.meta.env.VITE_COGNITO_USER_POOL_ID || "";
 const clientId = import.meta.env.VITE_COGNITO_APP_CLIENT_ID || "";
-const configured = Boolean(poolId && clientId);
+// Local preview only. Vite replaces import.meta.env.DEV with false in a
+// production build, so this branch never runs in the deployed dashboard.
+const devAuth = import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH === "true";
+const configured = devAuth || Boolean(poolId && clientId);
 
 // Keep bearer and refresh tokens in memory. Only temporary OAuth state/PKCE
 // material uses sessionStorage so the authorization redirect can round-trip.
@@ -55,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unregisterTokenReader = registerAccessTokenReader(async () => {
+      if (devAuth) return "dev-token";
       if (!manager) return null;
       const current = await manager.getUser();
       if (!current) return null;
@@ -69,6 +73,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       return current.access_token;
     });
+    if (devAuth) {
+      setUser({
+        profile: { email: "dev@sunrise.local" },
+        access_token: "dev-token",
+        expired: false,
+      } as unknown as User);
+      setReady(true);
+      return unregisterTokenReader;
+    }
     if (!manager) {
       setReady(true);
       return unregisterTokenReader;

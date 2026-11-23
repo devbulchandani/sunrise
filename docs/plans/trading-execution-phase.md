@@ -1,6 +1,6 @@
 # Sunrise trading execution: next phase plan
 
-Status: in progress. Cognito identity foundation is provisioned and deployed; broker integration is not connected and no orders can be submitted.
+Status: **paper trading implemented and deployed**. Live broker integration is not connected and no live orders can be submitted.
 
 ## Current project state
 
@@ -49,6 +49,19 @@ Sunrise scrapes market news, clusters articles, analyzes events through an LLM, 
 
 **Exit criteria:** end-to-end paper-only workflow through Telegram and dashboard with identical policies, explicit confirmation, complete audit trail, and a tested kill switch.
 
+**Progress (paper milestone):** Implemented a Sunrise-owned paper broker and ledger rather than a broker sandbox, because the Upstox sandbox is not designed for isolated multi-user accounts. It includes:
+
+- Per-user `paper_accounts` created on first use with a ₹10,00,000 simulated opening balance, isolated by Cognito `sub`.
+- A curated 22-symbol Indian paper universe and deterministic **simulated** quotes, labelled `simulated` throughout; no market-data feed or broker is contacted.
+- A `POST /api/trading/proposals` → `POST /api/trading/proposals/{id}/confirm` flow with a 15-minute expiry and explicit manual confirmation. A signal may pre-fill the ticket but can never submit an order.
+- Deterministic server-side checks at proposal **and** confirmation time: symbol eligibility, quantity, limit band, per-order notional, buying power, position cap, gross exposure, daily order cap, daily realised-loss cap, and optional NSE market hours.
+- Idempotent confirmation (`proposal_id` and `(account_id, client_order_id)` uniqueness), market fills with simulated slippage, open limit orders filled by a scheduler, cancellation, and a transactional cash/position/ledger update.
+- Durable audit events for proposal creation, confirmation, fill, rejection, and cancellation; an admin reconciliation endpoint recomputes cash and positions from filled orders.
+- Authenticated dashboard **Paper desk** with account summary, order ticket, risk-check review modal, positions, orders, cancellation, and per-order limits.
+- Independent `PAPER_TRADING_ENABLED` and `PAPER_TRADING_FROZEN` kill switches; `TRADING_ENABLED` remains false and no live broker credentials exist.
+
+**Still open for the full Phase 2 exit:** Telegram-originated confirmation (orders are dashboard-confirmed only), Upstox connector contract tests, partial fills, and a multi-session paper soak.
+
 ### Phase 3 — shadowing, paper soak, and readiness
 
 1. Run signal-to-proposal in shadow mode without submitting orders; record outcomes and realistic slippage assumptions. Do not represent results as guaranteed or predictive.
@@ -77,7 +90,7 @@ Event analysis remains independent of trade state. A signal may create a draft p
 
 ## Decisions before implementation
 
-User decisions so far: open signup; multi-user target; India only; paper trading with manual confirmation for the first release. Upstox Sandbox is the documented initial connector candidate; the user has not named a broker or instruments, so no broker-specific adapter or order flow has been enabled. Live mode stays disabled pending legal/broker review and a separate explicit launch decision.
+User decisions so far: open signup; multi-user target; India only; paper trading with manual confirmation for the first release. **Implemented:** a Sunrise-owned per-user paper ledger with simulated quotes, manual dashboard confirmation, and deterministic risk checks. Upstox Sandbox remains a future connector contract test; no broker credentials or live adapter are present. Live mode stays disabled pending legal/broker review and a separate explicit launch decision.
 
 ## Sources
 

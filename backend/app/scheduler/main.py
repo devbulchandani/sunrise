@@ -19,6 +19,7 @@ from app.services.healing.recovery import recover_stuck_healing
 from app.services.pipeline import cluster_new_articles, finalize_event
 from app.services.retention import purge_expired_content
 from app.services.scraping.runner import run_source
+from app.services.trading.broker import fill_open_orders
 
 setup_logging()
 log = get_logger("scheduler")
@@ -129,6 +130,15 @@ async def refresh_jobs(scheduler: AsyncIOScheduler) -> None:
         log.info("scheduler.job_removed", job=job_id)
 
 
+async def fill_paper_open_orders() -> None:
+    """Fill crossed paper limit orders once a minute."""
+    factory = get_session_factory()
+    async with factory() as session:
+        filled = await fill_open_orders(session)
+        if filled:
+            log.info("trading.open_orders_filled", count=filled)
+
+
 async def main() -> None:
     settings = get_settings()
     scheduler = AsyncIOScheduler(timezone="UTC")
@@ -143,6 +153,16 @@ async def main() -> None:
         coalesce=True,
         misfire_grace_time=3600,
     )
+    if settings.paper_trading_enabled:
+        scheduler.add_job(
+            fill_paper_open_orders,
+            CronTrigger(minute="*"),
+            id="trading:open_orders",
+            name="fill open paper orders",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=30,
+        )
     scheduler.start()
     log.info("scheduler.started")
 

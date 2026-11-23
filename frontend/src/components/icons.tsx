@@ -241,6 +241,28 @@ export const Signal = (p: IconProps) => (
   </Glyph>
 );
 
+export const Wallet = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H19a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 1 4 17.5v-10Z" />
+    <path d="M4 8h15M15.5 13.5h2" />
+    <circle cx="16.5" cy="13.5" r=".6" fill="currentColor" stroke="none" />
+  </Glyph>
+);
+
+export const TrendingUp = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="m4 15 5-5 4 4 7-8" />
+    <path d="M15 6h5v5" />
+  </Glyph>
+);
+
+export const TrendingDown = (p: IconProps) => (
+  <Glyph {...p}>
+    <path d="m4 9 5 5 4-4 7 8" />
+    <path d="M15 18h5v-5" />
+  </Glyph>
+);
+
 export const Dot = ({ className = "h-1.5 w-1.5" }: { className?: string }) => (
   <span className={`inline-block rounded-full bg-current ${className}`} aria-hidden="true" />
 );

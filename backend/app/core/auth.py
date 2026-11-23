@@ -124,6 +124,24 @@ async def require_admin(
     )
 
 
+async def require_paper_trader(
+    claims: dict[str, Any] = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    """Authenticated access to the simulated paper-trading desk.
+
+    This is deliberately independent of TRADING_ENABLED, which gates live
+    broker execution and stays false.
+    """
+    settings = get_settings()
+    if not settings.paper_trading_enabled:
+        raise HTTPException(status_code=503, detail="paper trading is disabled")
+    if settings.paper_trading_frozen:
+        raise HTTPException(status_code=503, detail="paper trading is frozen")
+    if not claims.get("sub"):
+        raise HTTPException(status_code=403, detail="paper trading requires a verified identity")
+    return claims
+
+
 async def require_trading_user(
     claims: dict[str, Any] = Depends(require_authenticated_user),
 ) -> dict[str, Any]:

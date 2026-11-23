@@ -10,6 +10,7 @@ import { Spinner } from "./components/ui";
 const EventDetail = lazy(() => import("./pages/EventDetail"));
 const Scrapers = lazy(() => import("./pages/Scrapers"));
 const SystemPage = lazy(() => import("./pages/System"));
+const Trading = lazy(() => import("./pages/Trading"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 
 function ScrollToTop() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/events/:id" element={<EventDetail />} />
           <Route path="/scrapers" element={<Scrapers />} />
           <Route path="/system" element={<SystemPage />} />
+          <Route path="/trading" element={<Trading />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="*" element={<MarketPulse />} />
         </Routes>
@@ -101,6 +103,7 @@ function Footer() {
               <ul className="space-y-2 text-xs text-ink-dim">
                 <li><Link className="link-underline" to="/">Market pulse</Link></li>
                 <li><Link className="link-underline" to="/scrapers">Collector health</Link></li>
+                <li><Link className="link-underline" to="/trading">Paper desk</Link></li>
                 <li><Link className="link-underline" to="/system">Operations</Link></li>
               </ul>
             </div>
