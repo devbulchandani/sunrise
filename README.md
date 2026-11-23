@@ -61,7 +61,7 @@ Every source has a **versioned extraction strategy** stored in Postgres — pure
 
 ## Data sources
 
-11 public sources seeded by default: Federal Reserve press releases (HTML), ECB press RSS, Bank of England RSS, Cointelegraph, CoinDesk, Yahoo Finance, Investing.com commodities, **TradingView Top Stories**, **Economic Times Markets (India)**, **LiveMint Markets (India)** — plus **MarketWatch via Bright Data** (see below). All public pages, robots.txt respected, rate-limited per host.
+10 public sources seeded by default: Federal Reserve press releases (HTML), ECB press RSS, Bank of England RSS, Cointelegraph, CoinDesk, BBC Business, Investing.com commodities, **TradingView Top Stories**, **Economic Times Markets (India)**, **LiveMint Markets (India)** — plus **MarketWatch via Bright Data** (registered only when `BRIGHTDATA_API_KEY` is set; see below). All public pages, robots.txt respected, rate-limited per host.
 
 **TradingView** is fully client-rendered, but the article list ships server-side inside `<script type="application/prs.init-data+json">` tags — the `tradingview` source type walks those scripts and extracts the news items JSON directly (title, link, storyPath, published timestamp).
 

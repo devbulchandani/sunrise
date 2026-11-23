@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 import httpx
 from dateutil import parser as date_parser
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -112,34 +114,48 @@ def _normalize_entry(entry: dict, source: Source) -> dict | None:
     }
 
 
-async def _persist_articles(session: AsyncSession, source: Source, entries: list[dict]) -> tuple[int, float]:
-    """Insert new articles. Returns (new_count, duplicate_ratio)."""
-    urls = [e.get("url") for e in entries]
-    existing_result = await session.execute(
-        select(Article.url, Article.content_hash).where(Article.source_id == source.id, Article.url.in_(urls))
-    )
-    seen_urls = {row[0] for row in existing_result}
+async def _persist_articles(
+    session: AsyncSession, source: Source, entries: list[dict]
+) -> tuple[int, float]:
+    """Insert new articles, ignoring duplicates. Returns (new_count, dup_ratio).
 
-    dupes = 0
-    new_rows: list[Article] = []
+    Uses INSERT ... ON CONFLICT DO NOTHING so duplicate URLs inside one feed
+    batch (BBC repeats entries) and concurrent runs cannot fail the whole
+    scrape. The (source_id, url) unique index is the source of truth.
+    """
+    normalized_entries: list[dict] = []
     for entry in entries:
         normalized = _normalize_entry(entry, source)
         if normalized is None:
             continue
-        if normalized["url"] in seen_urls:
-            dupes += 1
-            continue
-        fingerprint = content_fingerprint(normalized["title"], normalized["summary"])
-        normalized["content_hash"] = fingerprint
-        article = Article(**normalized)
-        session.add(article)
-        new_rows.append(article)
+        normalized["content_hash"] = content_fingerprint(
+            normalized["title"], normalized["summary"]
+        )
+        normalized_entries.append(normalized)
 
-    await session.flush()
-    for a in new_rows:
-        log.info("article.saved", source=source.slug, title=a.title[:80])
-    total = len(entries) or 1
-    return len(new_rows), round(dupes / total, 3)
+    total = len(normalized_entries)
+    if total == 0:
+        return 0, 0.0
+
+    bind = session.bind
+    dialect = bind.dialect.name if bind is not None else "postgresql"
+    insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+    statement = (
+        insert_fn(Article)
+        .values(normalized_entries)
+        .on_conflict_do_nothing(index_elements=["source_id", "url"])
+    )
+    result = await session.execute(statement)
+    new_count = max(result.rowcount or 0, 0)
+    duplicates = max(total - new_count, 0)
+    log.info(
+        "articles.persisted",
+        source=source.slug,
+        total=total,
+        new=new_count,
+        duplicates=duplicates,
+    )
+    return new_count, round(duplicates / total, 3)
 
 
 async def run_source(
